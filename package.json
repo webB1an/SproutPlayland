@@ -1,0 +1,10 @@
+{
+  "name": "sprout-playland",
+  "version": "3.8.8",
+  "private": true,
+  "description": "小芽智趣岛微信小游戏",
+  "creator": {
+    "version": "3.8.8"
+  },
+  "uuid": "8e2bcf25-b91e-466b-9a5a-a846632061c5"
+}
