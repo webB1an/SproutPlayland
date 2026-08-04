@@ -24,18 +24,26 @@ export class ColorSelectPage extends MatchSelectPageBase<ColorLevelConfig> {
   }
 
   protected drawHeaderIcon(parent: Node): void {
-    const colors = COLOR_LEVELS[0].palette;
-    this.createCircle(parent, -34, 306, 23, colors[0]);
-    this.createCircle(parent, 0, 306, 23, colors[1]);
-    this.createCircle(parent, 34, 306, 23, colors[2]);
+    const level = COLOR_LEVELS[0];
+    level.palette.slice(0, 3).forEach((color, index) => {
+      const x = (index - 1) * 42;
+      this.createToyShapeLayer(
+        parent,
+        `ColorHeaderMarker${index}`,
+        x,
+        306,
+        40,
+        level.markerShapes[index],
+        color,
+        new Color(255, 255, 246, 220),
+        3,
+      );
+    });
   }
 
   protected drawLevelThumbnail(parent: Node, level: ColorLevelConfig, index: number): void {
-    const frameName = index === 0 && this.frames.has('forest-delivery-card')
-      ? 'forest-delivery-card'
-      : `color-${level.id}`;
-    if (this.frames.has(frameName)) {
-      this.createCoverImage(parent, frameName, 0, 22, 188, 188, 18);
+    if (this.frames.has(level.thumbnailFrame)) {
+      this.createCoverImage(parent, level.thumbnailFrame, 0, 22, 188, 188, 18);
       return;
     }
     this.createPanel(parent, `ColorFallback${index}`, 0, 22, 188, 188, level.background, 18);
