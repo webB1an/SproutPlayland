@@ -25,17 +25,25 @@ export class ShapeSelectPage extends MatchSelectPageBase<ShapeLevelConfig> {
 
   protected drawHeaderIcon(parent: Node): void {
     const level = SHAPE_LEVELS[0];
-    this.createToyShapeLayer(parent, 'ShapeHeaderCircle', -36, 306, 45, 'circle', level.colors[0]);
-    this.createToyShapeLayer(parent, 'ShapeHeaderStar', 4, 307, 50, 'star', level.colors[4]);
-    this.createToyShapeLayer(parent, 'ShapeHeaderTriangle', 45, 305, 45, 'triangle', level.colors[2]);
+    const shapes = ['circle', 'star', 'triangle'] as const;
+    shapes.forEach((shape, index) => {
+      this.createToyShapeLayer(
+        parent,
+        `ShapeHeader${shape}`,
+        (index - 1) * 43,
+        306,
+        43,
+        shape,
+        level.colors[index * 2],
+        new Color(255, 255, 246, 220),
+        3,
+      );
+    });
   }
 
   protected drawLevelThumbnail(parent: Node, level: ShapeLevelConfig, index: number): void {
-    const frameName = index === 0 && this.frames.has('forest-turtle-board-bg')
-      ? 'forest-turtle-board-bg'
-      : `shape-${level.id}`;
-    if (this.frames.has(frameName)) {
-      this.createCoverImage(parent, frameName, 0, 22, 188, 188, 18);
+    if (this.frames.has(level.thumbnailFrame)) {
+      this.createCoverImage(parent, level.thumbnailFrame, 0, 22, 188, 188, 18);
       return;
     }
     this.createPanel(parent, `ShapeFallback${index}`, 0, 22, 188, 188, level.background, 18);
