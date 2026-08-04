@@ -5,7 +5,6 @@ import {
   tween,
   Vec3,
 } from 'cc';
-import type { CategoryId } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
 
 export class HomePage extends PageController {
@@ -34,9 +33,7 @@ export class HomePage extends PageController {
     } else {
       this.createSproutMark(root, -430, 16, 1.7);
     }
-    this.createCategoryCard(root, 'puzzle', -45, 0, new Color(223, 240, 197, 255), new Color(111, 169, 89, 255));
-    this.createCategoryCard(root, 'color', 218, 0, new Color(255, 226, 193, 255), new Color(244, 146, 91, 255));
-    this.createCategoryCard(root, 'shape', 481, 0, new Color(204, 232, 232, 255), new Color(74, 158, 163, 255));
+    this.createPuzzleCard(root, 218, 0);
     this.createVoiceSettingsButton(root);
   }
 
@@ -182,42 +179,33 @@ export class HomePage extends PageController {
     startIdleMotion();
   }
 
-  private createCategoryCard(
+  private createPuzzleCard(
     parent: Node,
-    category: CategoryId,
     x: number,
     y: number,
-    fill: Color,
-    accent: Color,
   ): void {
     this.createPanel(parent, 'CategoryShadow', x + 3, y - 8, 230, 420, new Color(91, 75, 53, 20), 44);
     const card = this.createPanel(
       parent,
-      `${category}Card`,
+      'puzzleCard',
       x,
       y,
       230,
       420,
-      fill,
+      new Color(223, 240, 197, 255),
       44,
       new Color(255, 255, 244, 200),
       4,
     );
     this.createCircle(card, 0, 52, 98, new Color(255, 255, 245, 185));
-    if (category === 'puzzle') {
-      if (this.frames.has('shape-regular-selected')) {
-        this.createImage(card, 'shape-regular-selected', 0, 56, 166, 166);
-      } else {
-        this.createPuzzleGridMark(card, 4, 0, 55, true);
-      }
-    } else if (category === 'color') {
-      this.createColorMark(card, 0, 55, 1.15);
+    if (this.frames.has('shape-regular-selected')) {
+      this.createImage(card, 'shape-regular-selected', 0, 56, 166, 166);
     } else {
-      this.createShapeMark(card, 0, 55, 1.15);
+      this.createPuzzleGridMark(card, 4, 0, 55, true);
     }
-    this.createCircle(card, 0, -132, 34, accent);
+    this.createCircle(card, 0, -132, 34, new Color(111, 169, 89, 255));
     this.createLabel(card, '›', 2, -128, 43, new Color(255, 255, 244, 255), 50, 50);
-    this.makeButton(card, () => this.showCategory(category));
+    this.makeButton(card, () => this.showCategory('puzzle'));
   }
 
   private createVoiceSettingsButton(parent: Node): void {

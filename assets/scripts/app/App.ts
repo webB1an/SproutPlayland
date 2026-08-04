@@ -29,15 +29,12 @@ import {
 } from '../games/puzzle/PuzzleConfig';
 import { PuzzleDepthRenderer } from '../games/puzzle/PuzzleDepthRenderer';
 import { PuzzleInteractionController } from '../games/puzzle/PuzzleInteractionController';
-import { CategoryPage } from './pages/CategoryPage';
-import { ColorGameFlow } from '../games/color/ColorGameFlow';
 import { CustomVoiceController, type VoiceCue } from './CustomVoiceController';
 import { GameAudioController } from './GameAudioController';
 import { HomePage } from './pages/HomePage';
 import { PuzzleDetailPage } from './pages/PuzzleDetailPage';
 import { PuzzleGamePage } from './pages/PuzzleGamePage';
 import { PuzzleSelectPage } from './pages/PuzzleSelectPage';
-import { ShapeGameFlow } from '../games/shape/ShapeGameFlow';
 import { VoiceSettingsPage } from './pages/VoiceSettingsPage';
 import type {
   CategoryId,
@@ -111,13 +108,10 @@ export class SproutPlaylandApp extends Component {
     width,
     height,
   ) => this.createUiNode(name, parent, x, y, width, height));
-  private readonly categoryPage = new CategoryPage(this);
-  private readonly colorGame = new ColorGameFlow(this);
   private readonly homePage = new HomePage(this);
   private readonly puzzleDetailPage = new PuzzleDetailPage(this);
   private readonly puzzleGamePage = new PuzzleGamePage(this);
   private readonly puzzleSelectPage = new PuzzleSelectPage(this);
-  private readonly shapeGame = new ShapeGameFlow(this);
   private readonly voiceSettingsPage = new VoiceSettingsPage(this);
 
   start(): void {
@@ -165,48 +159,16 @@ export class SproutPlaylandApp extends Component {
   }
   private showCategory(category: CategoryId): void {
     const navigationSequence = ++this.navigationSequence;
-    if (category === 'puzzle') {
-      if (this.loadedArtDirectories.has('art/games/puzzle')) {
+    if (this.loadedArtDirectories.has('art/games/puzzle')) {
+      this.puzzleSelectPage.show();
+      return;
+    }
+    this.puzzleSelectPage.showLoading();
+    void this.loadArtDirectory('art/games/puzzle').then(() => {
+      if (navigationSequence === this.navigationSequence) {
         this.puzzleSelectPage.show();
-        return;
       }
-      this.puzzleSelectPage.showLoading();
-      void this.loadArtDirectory('art/games/puzzle').then(() => {
-        if (navigationSequence === this.navigationSequence) {
-          this.puzzleSelectPage.show();
-        }
-      });
-      return;
-    }
-    if (category === 'color') {
-      const path = 'art/games/color';
-      if (this.loadedArtDirectories.has(path)) {
-        this.colorGame.showSelect();
-        return;
-      }
-      this.colorGame.showLoading();
-      void this.loadArtDirectory(path).then(() => {
-        if (navigationSequence === this.navigationSequence) {
-          this.colorGame.showSelect();
-        }
-      });
-      return;
-    }
-    if (category === 'shape') {
-      const path = 'art/games/shape';
-      if (this.loadedArtDirectories.has(path)) {
-        this.shapeGame.showSelect();
-        return;
-      }
-      this.shapeGame.showLoading();
-      void this.loadArtDirectory(path).then(() => {
-        if (navigationSequence === this.navigationSequence) {
-          this.shapeGame.showSelect();
-        }
-      });
-      return;
-    }
-    this.categoryPage.show(category);
+    });
   }
   private showGameDetail(
     category: CategoryId,
@@ -710,37 +672,6 @@ export class SproutPlaylandApp extends Component {
       ray.angle = i * 45;
     }
     this.createCircle(mark, 0, 0, 48 * scale, new Color(255, 205, 73, 255));
-  }
-
-  private createColorMark(parent: Node, x: number, y: number, scale: number): void {
-    this.createCircle(parent, x - 42 * scale, y + 18 * scale, 39 * scale, new Color(247, 122, 102, 255));
-    this.createCircle(parent, x + 42 * scale, y + 18 * scale, 39 * scale, new Color(255, 195, 70, 255));
-    this.createCircle(parent, x, y - 40 * scale, 39 * scale, new Color(92, 171, 205, 255));
-    this.createCircle(parent, x - 52 * scale, y + 30 * scale, 10 * scale, new Color(255, 255, 245, 120));
-    this.createCircle(parent, x + 32 * scale, y + 30 * scale, 10 * scale, new Color(255, 255, 245, 120));
-  }
-
-  private createShapeMark(parent: Node, x: number, y: number, scale: number): void {
-    this.createCircle(parent, x - 50 * scale, y + 25 * scale, 35 * scale, new Color(246, 142, 105, 255));
-    const square = this.createPanel(
-      parent,
-      'ShapeSquare',
-      x + 48 * scale,
-      y + 26 * scale,
-      66 * scale,
-      66 * scale,
-      new Color(91, 174, 169, 255),
-      15 * scale,
-    );
-    square.angle = 8;
-    this.createTriangle(
-      parent,
-      x,
-      y - 50 * scale,
-      82 * scale,
-      72 * scale,
-      new Color(255, 197, 73, 255),
-    );
   }
 
   private createTriangle(

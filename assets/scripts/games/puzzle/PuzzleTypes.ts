@@ -1,7 +1,7 @@
 // 拼图玩法模块共享的数据类型。
 import { Color, Node, Vec3 } from 'cc';
 
-export type CategoryId = 'puzzle' | 'color' | 'shape';
+export type CategoryId = 'puzzle';
 
 export type PuzzleShape = 'regular' | 'hexagon' | 'circle';
 

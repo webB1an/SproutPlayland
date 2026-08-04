@@ -52,7 +52,7 @@ assets/scripts/
 - `games/puzzle/PuzzleDepthRenderer.ts`：2.5D 厚度、端点收口和侧壁材质；
 - `games/puzzle/PuzzleInteractionController.ts`：拖动、回弹、吸附和拼块连接状态。
 
-新增玩法时不得继续把算法、配置或交互状态直接堆入 `App.ts`。页面只负责组织模块和响应导航。不同游戏必须建立独立目录，例如 `games/color/`、`games/shape/`；同一种游戏的配置、类型、算法、渲染和控制器统一放在该游戏目录中。
+新增拼图能力时不得继续把算法、配置或交互状态直接堆入 `App.ts`。页面只负责组织模块和响应导航；拼图的配置、类型、算法、渲染和控制器统一放在 `games/puzzle/` 中。
 
 美术资源位于：
 
@@ -60,13 +60,11 @@ assets/scripts/
 assets/resources/art
 ```
 
-资源按用途和游戏类型分目录：
+资源按用途分目录：
 
 ```text
-assets/resources/art/common/home/       # 首页等跨游戏资源
+assets/resources/art/common/home/       # 首页资源
 assets/resources/art/games/puzzle/      # 拼图专用图片与图标
-assets/resources/art/games/color/       # 后续颜色游戏资源
-assets/resources/art/games/shape/       # 后续形状游戏资源
 ```
 
 首页插画、关卡缩略图和拼图源图必须作为独立用途管理，不能因为替换某一关的图片而改动首页。当前首页使用 `common/home/home-island.png`，第一关拼图使用 `games/puzzle/home-island-fullscene.png`。

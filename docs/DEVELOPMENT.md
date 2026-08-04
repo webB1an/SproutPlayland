@@ -37,27 +37,21 @@
 
 - 页面流程与拼图底层能力必须分离。
 - `scripts/app/App.ts` 只负责页面组装、导航、资源加载和跨页面事件接线，不能重新承载页面 UI、拼齿算法或拖动状态机。
-- 不同类型的游戏必须放在不同目录，例如 `scripts/games/puzzle/`、`scripts/games/color/`、`scripts/games/shape/`。
-- 同一种游戏的配置、类型、算法、渲染和控制器必须聚合在该游戏目录下，禁止按技术层把不同游戏混在一起。
+- 当前只保留拼图玩法，拼图的配置、类型、算法、渲染和控制器必须聚合在 `scripts/games/puzzle/` 下。
 - 拼图数据类型统一放在 `games/puzzle/PuzzleTypes.ts`，关卡与默认参数统一放在 `games/puzzle/PuzzleConfig.ts`。
 - 拼齿和圆角路径统一由 `games/puzzle/PuzzleGeometry.ts` 生成，禁止页面自行复制拼齿计算。
 - 2.5D 厚度统一由 `games/puzzle/PuzzleDepthRenderer.ts` 渲染，禁止为单独页面另写阴影或厚度规则。
 - 拖动、回弹、吸附、连接边显隐统一由 `games/puzzle/PuzzleInteractionController.ts` 管理。
-- 新增颜色、形状等游戏时，应为每种玩法建立独立页面/控制器模块，通过公共导航接入，不得继续扩大单一入口文件。
-- 颜色与形状玩法采用“关卡列表 → 游戏 → 星级结算”流程；点击卡片会按已有星级自动进入下一档难度（0/1/2 星对应简单/中等/困难，3 星默认重玩困难），各自的 `GameFlow` 保存页面状态，`App.ts` 只接入游戏入口。
-- 颜色与形状关卡最高星级分别独立保存在本地；1、2、3 档难度分别获得 1、2、3 星，入口卡片必须回显历史最高成绩。
 
 ## 资源结构
 
-- 跨游戏资源放在 `resources/art/common/`，并继续按首页、通用图标、通用反馈等用途细分。
+- 首页和通用 UI 资源放在 `resources/art/common/`，并按首页、通用图标、通用反馈等用途细分。
 - 启动阶段只加载首页与必要的通用 UI；游戏大图必须在进入对应游戏后按目录加载，禁止恢复为启动时 `loadDir('art')` 全量加载。
-- 跨游戏短音效统一放在 `resources/audio/common/`，通过 `app/GameAudioController.ts` 加载和播放；新游戏直接复用 `tap`、`pickup`、`drop`、`success`、`celebrate` 事件。
+- 拼图与页面短音效统一放在 `resources/audio/common/`，通过 `app/GameAudioController.ts` 加载和播放。
 - 家长自定义鼓励语音统一由 `app/CustomVoiceController.ts` 管理。微信小游戏录音保存在本地用户目录，浏览器预览保存在 IndexedDB；没有录制对应事件时必须静默，禁止自动回退到内置真人语音。
 - 自定义语音设置 UI 统一放在 `app/pages/VoiceSettingsPage.ts`，游戏页面只能触发 `correct`、`retry`、`complete`、`star1` 等语音事件，不能自行访问录音和文件接口。
 - 调整通用音效后运行 `node tools/generate-game-audio.mjs` 重新生成 WAV 文件，避免在多个游戏中维护重复资源。
-- 游戏专用资源放在 `resources/art/games/<游戏类型>/`。
-- 拼图图片、拼图图标和仅限拼图玩法的专用声音归入 `games/puzzle/`，不得与颜色或形状游戏资源混放。
-- 颜色、形状等新游戏分别使用 `games/color/`、`games/shape/`。
+- 拼图图片、拼图图标和拼图专用资源统一放在 `resources/art/games/puzzle/`。
 - 移动 Cocos 资源时必须同时保留对应 `.meta` 文件，避免 UUID 变化导致场景引用丢失。
 
 ## 下一阶段
@@ -66,4 +60,4 @@
 2. 在微信真机验证家长自定义鼓励语音的录制权限与持久化。
 3. 增加四块拼图难度。
 4. 在真机上观察儿童拖拽、误触和停顿。
-5. 根据儿童实测继续调整形状配对 4/6/8 块、颜色分类 3/4/5 色的尺寸和吸附范围。
+5. 根据儿童实测继续调整拼块尺寸、散落布局和吸附范围。
