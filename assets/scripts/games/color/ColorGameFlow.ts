@@ -9,7 +9,7 @@ export class ColorGameFlow {
   private selectedLevelIndex = 0;
   private difficulty: MatchDifficulty = 1;
   private readonly progress = new MatchProgressStore(
-    'sprout-playland:color-stars:v1',
+    'sprout-playland:color-stars:v3',
     COLOR_LEVELS.map((level) => level.id),
   );
   private readonly selectPage: ColorSelectPage;

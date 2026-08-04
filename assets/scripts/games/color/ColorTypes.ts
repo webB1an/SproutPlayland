@@ -1,30 +1,32 @@
 import { Color } from 'cc';
-import type { ToyShape } from '../common/MatchTypes';
+import type { MatchDifficulty, MatchLevelBase } from '../common/MatchTypes';
 
-export type ColorCompletionEffect =
-  | 'float'
-  | 'bounce'
-  | 'swim'
-  | 'pop'
-  | 'flutter'
-  | 'sway'
-  | 'splash'
-  | 'bloom'
-  | 'roll';
+export type ColorId = 'red' | 'yellow' | 'blue' | 'green' | 'purple';
+export type ColorCue = 'dots' | 'stripes' | 'star' | 'waves' | 'heart';
+export type ColorSceneKind = 'balloon' | 'orchard' | 'fish' | 'train';
+export type ColorCelebration = 'balloon-fly' | 'fruit-party' | 'fish-swim' | 'train-go';
 
-/**
- * 一个颜色主题包只描述资源和表现，不包含页面分支逻辑。
- * 后续增加主题时，只需增加资源并追加一条配置。
- */
-export type ColorLevelConfig = {
-  id: string;
+export type ColorToken = {
+  id: ColorId;
+  color: Color;
+  cue: ColorCue;
+};
+
+export type ColorStageConfig = {
+  itemCount: 3 | 4 | 5;
+  presentOneByOne: boolean;
+  targetCueOpacity: number;
+  snapPadding: number;
+  trayAngle: number;
+};
+
+export type ColorLevelConfig = MatchLevelBase & {
+  title: string;
+  subtitle: string;
+  sceneKind: ColorSceneKind;
   background: Color;
   accent: Color;
-  palette: readonly Color[];
-  markerShapes: readonly ToyShape[];
-  thumbnailFrame: string;
-  backgroundFrame: string;
-  itemFrame: string;
-  targetFrame: string;
-  completionEffect: ColorCompletionEffect;
+  palette: readonly ColorToken[];
+  stages: Record<MatchDifficulty, ColorStageConfig>;
+  celebration: ColorCelebration;
 };
