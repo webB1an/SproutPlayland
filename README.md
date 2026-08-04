@@ -37,11 +37,22 @@
 
 ## 日常开发与调试
 
-主要业务代码位于：
+业务代码位于：
 
 ```text
-assets/scripts/App.ts
+assets/scripts/
 ```
+
+当前模块职责：
+
+- `app/App.ts`：页面流程、场景组装和资源接入；
+- `games/puzzle/PuzzleConfig.ts`：拼图关卡和默认选项；
+- `games/puzzle/PuzzleTypes.ts`：拼图模块共享的数据类型；
+- `games/puzzle/PuzzleGeometry.ts`：拼齿、圆角、曲线路径和边缘采样；
+- `games/puzzle/PuzzleDepthRenderer.ts`：2.5D 厚度、端点收口和侧壁材质；
+- `games/puzzle/PuzzleInteractionController.ts`：拖动、回弹、吸附和拼块连接状态。
+
+新增玩法时不得继续把算法、配置或交互状态直接堆入 `App.ts`。页面只负责组织模块和响应导航。不同游戏必须建立独立目录，例如 `games/color/`、`games/shape/`；同一种游戏的配置、类型、算法、渲染和控制器统一放在该游戏目录中。
 
 美术资源位于：
 
@@ -49,7 +60,16 @@ assets/scripts/App.ts
 assets/resources/art
 ```
 
-首页插画、关卡缩略图和拼图源图必须作为三种独立用途管理，不能因为替换某一关的图片而改动首页。当前首页使用 `home-island.png`，第一关拼图使用 `home-island-fullscene.png`。
+资源按用途和游戏类型分目录：
+
+```text
+assets/resources/art/common/home/       # 首页等跨游戏资源
+assets/resources/art/games/puzzle/      # 拼图专用图片与图标
+assets/resources/art/games/color/       # 后续颜色游戏资源
+assets/resources/art/games/shape/       # 后续形状游戏资源
+```
+
+首页插画、关卡缩略图和拼图源图必须作为独立用途管理，不能因为替换某一关的图片而改动首页。当前首页使用 `common/home/home-island.png`，第一关拼图使用 `games/puzzle/home-island-fullscene.png`。
 
 拼图系统不要求源图预先做成正方形，也不依赖图片四周透明。所有关卡图和用户上传照片都经过同一套显示规则：
 
