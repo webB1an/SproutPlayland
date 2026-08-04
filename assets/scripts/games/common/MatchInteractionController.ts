@@ -66,9 +66,10 @@ export class MatchInteractionController {
       dragOffset = active.node.position.clone().subtract(point);
       active.node.setSiblingIndex(surface.children.length - 1);
       this.callbacks.onPickup?.(active);
+      const liftedScale = active.node.scale.clone().multiplyScalar(1.08);
       tween(active.node)
         .stop()
-        .to(0.1, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'quadOut' })
+        .to(0.1, { scale: liftedScale }, { easing: 'quadOut' })
         .start();
     });
 
