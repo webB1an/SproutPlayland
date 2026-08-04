@@ -1,6 +1,5 @@
 import {
   Color,
-  Graphics,
   Node,
   tween,
   UIOpacity,
@@ -56,22 +55,19 @@ export abstract class MatchGamePageBase extends ToyPageController {
     root: Node,
     completion: MatchCompletionOptions,
   ): void {
-    if (this.matchCompleted) {
-      return;
-    }
+    if (this.matchCompleted) return;
     this.matchCompleted = true;
     const stars = completion.complete();
     let continued = false;
+
     const continueToReward = (): void => {
-      if (continued) {
-        return;
-      }
+      if (continued || !root.isValid || this.contentRoot !== root) return;
       continued = true;
       this.gameAudio?.play('celebrate');
       void this.customVoice?.play('complete');
       this.createCelebrationConfetti(root);
       tween(root)
-        .delay(1.35)
+        .delay(0.95)
         .call(() => {
           if (root.isValid && this.contentRoot === root) {
             this.showMatchCompletion(root, stars, completion);
@@ -83,6 +79,8 @@ export abstract class MatchGamePageBase extends ToyPageController {
 
     if (completion.beforeCelebrate) {
       completion.beforeCelebrate(continueToReward);
+      // 主题动画异常时也不会阻塞关卡结束。
+      tween(root).delay(4.2).call(continueToReward).start();
       return;
     }
     continueToReward();
@@ -93,59 +91,100 @@ export abstract class MatchGamePageBase extends ToyPageController {
     stars: number,
     completion: MatchCompletionOptions,
   ): void {
-    this.createPanel(root, 'MatchModalShadow', 5, -8, 620, 360, new Color(72, 58, 38, 28), 48);
+    const dim = this.createPanel(
+      root,
+      'CompletionDim',
+      0,
+      0,
+      this.visibleWidth,
+      this.designHeight,
+      new Color(45, 56, 68, 62),
+      0,
+    );
+    dim.addComponent(UIOpacity).opacity = 0;
+    tween(dim.getComponent(UIOpacity)!).to(0.18, { opacity: 255 }).start();
+
+    this.createPanel(root, 'RewardShadow', 8, -15, 650, 410, new Color(66, 47, 39, 48), 52);
+    this.createPanel(root, 'RewardSide', 0, -8, 650, 410, new Color(222, 154, 55, 255), 52);
     const overlay = this.createPanel(
       root,
       'MatchCompletion',
       0,
       0,
-      620,
-      360,
-      new Color(255, 252, 226, 255),
-      48,
-      new Color(244, 187, 73, 255),
-      6,
+      650,
+      405,
+      new Color(255, 250, 218, 255),
+      52,
+      new Color(255, 255, 248, 240),
+      5,
     );
-    overlay.setScale(new Vec3(0.72, 0.72, 1));
-    tween(overlay).to(0.32, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
+    overlay.setScale(new Vec3(0.68, 0.68, 1));
+    tween(overlay).to(0.34, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
 
-    this.createStarRow(overlay, stars, 0, 118, 55, 76);
-    this.createCircle(overlay, 0, 32, 49, new Color(205, 237, 178, 255));
-    const check = this.createUiNode('MatchCheck', overlay, 0, 33, 66, 58);
-    const graphics = check.addComponent(Graphics);
-    const checkColor = new Color(69, 165, 80, 255);
-    graphics.strokeColor = checkColor;
-    graphics.lineWidth = 12;
-    graphics.moveTo(-23, 2);
-    graphics.lineTo(-7, -15);
-    graphics.lineTo(25, 20);
-    graphics.stroke();
-    this.createCircle(check, -23, 2, 6, checkColor);
-    this.createCircle(check, -7, -15, 6, checkColor);
-    this.createCircle(check, 25, 20, 6, checkColor);
+    this.createLabel(
+      overlay,
+      '太棒啦！',
+      0,
+      145,
+      43,
+      new Color(235, 104, 73, 255),
+      430,
+      58,
+    );
 
-    const replayButton = this.createImage(overlay, 'ui-replay', -160, -108, 88, 88);
-    replayButton.name = 'ReplayButton';
-    this.makeButton(replayButton, completion.replay);
+    for (let index = 0; index < 3; index++) {
+      const star = this.createPuzzleStarMark(
+        overlay,
+        (index - 1) * 92,
+        75,
+        66,
+        index < stars,
+      );
+      star.setScale(new Vec3(0.18, 0.18, 1));
+      tween(star)
+        .delay(0.12 + index * 0.13)
+        .to(0.28, { scale: Vec3.ONE, angle: index % 2 === 0 ? -6 : 6 }, { easing: 'backOut' })
+        .to(0.12, { angle: 0 })
+        .start();
+    }
 
-    const nextButton = this.createImage(overlay, 'ui-next', 0, -108, 88, 88);
-    nextButton.name = 'NextButton';
-    this.makeButton(nextButton, completion.next);
+    const mascot = this.createCircle(overlay, 0, -8, 55, new Color(128, 205, 104, 255));
+    this.createCircle(mascot, -20, 14, 8, new Color(255, 255, 255, 105));
+    this.createCuteFace(mascot, 0, -3, 23);
+    mascot.setScale(new Vec3(0.45, 0.45, 1));
+    tween(mascot)
+      .delay(0.28)
+      .to(0.28, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'backOut' })
+      .to(0.18, { scale: Vec3.ONE })
+      .start();
 
-    const selectButton = this.createImage(overlay, 'ui-menu', 160, -108, 88, 88);
-    selectButton.name = 'SelectButton';
-    this.makeButton(selectButton, completion.select);
+    this.createRewardButton(overlay, 'ui-replay', -170, -132, new Color(255, 186, 57, 255), completion.replay);
+    this.createRewardButton(overlay, 'ui-next', 0, -132, new Color(90, 190, 93, 255), completion.next, 1.08);
+    this.createRewardButton(overlay, 'ui-menu', 170, -132, new Color(72, 160, 226, 255), completion.select);
+  }
+
+  private createRewardButton(
+    parent: Node,
+    frame: string,
+    x: number,
+    y: number,
+    color: Color,
+    action: () => void,
+    scale = 1,
+  ): void {
+    this.createCircle(parent, x + 4, y - 9, 49 * scale, new Color(71, 52, 40, 42));
+    this.createCircle(parent, x, y - 5, 49 * scale, this.darken(color, 0.78));
+    const button = this.createCircle(parent, x, y, 48 * scale, color);
+    this.createCircle(button, -15 * scale, 16 * scale, 7 * scale, new Color(255, 255, 255, 125));
+    if (this.frames.has(frame)) {
+      const icon = this.createImage(button, frame, 0, 2, 64 * scale, 64 * scale);
+      icon.name = `${frame}Icon`;
+    }
+    this.makeButton(button, action);
   }
 
   private createCelebrationConfetti(parent: Node): void {
-    const layer = this.createUiNode(
-      'MatchConfetti',
-      parent,
-      0,
-      0,
-      this.visibleWidth,
-      this.designHeight,
-    );
+    const layer = this.createUiNode('MatchConfetti', parent, 0, 0, this.visibleWidth, this.designHeight);
     const colors = [
       new Color(255, 91, 119, 255),
       new Color(255, 198, 61, 255),
@@ -154,32 +193,29 @@ export abstract class MatchGamePageBase extends ToyPageController {
       new Color(157, 102, 226, 255),
     ];
     const bottom = -this.designHeight / 2 - 55;
-    for (let index = 0; index < 54; index++) {
+    for (let index = 0; index < 46; index++) {
       const side = index % 2 === 0 ? -1 : 1;
       const startX = side * this.visibleWidth * (0.31 + Math.random() * 0.12);
       const apexX = startX - side * (100 + Math.random() * 300);
-      const apexY = 100 + Math.random() * 250;
-      const width = 7 + Math.random() * 8;
+      const apexY = 90 + Math.random() * 250;
+      const width = 8 + Math.random() * 8;
       const confetti = this.createPanel(
         layer,
         `MatchConfetti${index}`,
         startX,
         bottom,
         width,
-        12 + Math.random() * 12,
+        13 + Math.random() * 12,
         colors[index % colors.length],
-        3,
+        4,
       );
       const opacity = confetti.addComponent(UIOpacity);
-      const delay = Math.random() * 0.2;
-      const rise = 0.55 + Math.random() * 0.25;
-      const fall = 1.05 + Math.random() * 0.35;
+      const delay = Math.random() * 0.18;
+      const rise = 0.52 + Math.random() * 0.22;
+      const fall = 0.95 + Math.random() * 0.32;
       tween(confetti)
         .delay(delay)
-        .to(rise, {
-          position: new Vec3(apexX, apexY),
-          angle: 260,
-        }, { easing: 'quadOut' })
+        .to(rise, { position: new Vec3(apexX, apexY), angle: 260 }, { easing: 'quadOut' })
         .to(fall, {
           position: new Vec3(apexX + (Math.random() - 0.5) * 180, bottom),
           angle: 620,
@@ -190,6 +226,6 @@ export abstract class MatchGamePageBase extends ToyPageController {
         .to(fall * 0.28, { opacity: 0 })
         .start();
     }
-    tween(layer).delay(2.5).call(() => layer.isValid && layer.destroy()).start();
+    tween(layer).delay(2.4).call(() => layer.isValid && layer.destroy()).start();
   }
 }
