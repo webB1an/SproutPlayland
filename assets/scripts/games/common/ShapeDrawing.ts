@@ -15,6 +15,12 @@ export function drawToyShapePath(
     graphics.roundRect(-radius, -radius, size, size, size * 0.2);
     return;
   }
+  if (shape === 'rectangle') {
+    const width = size * 1.35;
+    const height = size * 0.78;
+    graphics.roundRect(-width / 2, -height / 2, width, height, size * 0.16);
+    return;
+  }
   if (shape === 'oval') {
     const horizontal = radius;
     const vertical = radius * 0.68;
