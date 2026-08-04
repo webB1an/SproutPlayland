@@ -5,24 +5,54 @@ import {
   UITransform,
   Vec3,
 } from 'cc';
-import type { MatchItemState } from './MatchTypes';
+import type {
+  MatchItemState,
+  MatchRule,
+  MatchTargetState,
+} from './MatchTypes';
 
 type MatchCallbacks = {
   touchToRoot: (event: EventTouch) => Vec3;
   isCompleted: () => boolean;
+  canMatch?: MatchRule;
   onPickup?: (item: MatchItemState) => void;
   onWrong?: (item: MatchItemState) => void;
-  onMatched?: (item: MatchItemState) => void;
+  onTargetFocus?: (
+    item: MatchItemState,
+    target: MatchTargetState | null,
+  ) => void;
+  onMatched?: (
+    item: MatchItemState,
+    target: MatchTargetState,
+  ) => void;
   onAllMatched: () => void;
 };
 
-/** 跨游戏复用的拖拽、边界限制、正确吸附与错误回位控制器。 */
+/**
+ * 跨游戏复用的拖拽控制器。
+ *
+ * 与旧版不同，拼块和目标完全分离：一个拼块可以匹配多个兼容目标，
+ * 因此可以直接支持“任意圆形轮胎”“任意红色容器”以及后续复合规则。
+ */
 export class MatchInteractionController {
   constructor(private readonly callbacks: MatchCallbacks) {}
 
-  bind(surface: Node, items: MatchItemState[]): void {
+  bind(
+    surface: Node,
+    items: MatchItemState[],
+    targets: MatchTargetState[],
+  ): void {
     let active: MatchItemState | null = null;
+    let focusedTarget: MatchTargetState | null = null;
     let dragOffset = new Vec3();
+
+    const setFocus = (target: MatchTargetState | null): void => {
+      if (!active || focusedTarget === target) {
+        return;
+      }
+      focusedTarget = target;
+      this.callbacks.onTargetFocus?.(active, target);
+    };
 
     surface.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
       if (this.callbacks.isCompleted()) {
@@ -38,7 +68,7 @@ export class MatchInteractionController {
       this.callbacks.onPickup?.(active);
       tween(active.node)
         .stop()
-        .to(0.1, { scale: new Vec3(1.06, 1.06, 1) }, { easing: 'quadOut' })
+        .to(0.1, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'quadOut' })
         .start();
     });
 
@@ -48,36 +78,46 @@ export class MatchInteractionController {
       }
       const point = this.callbacks.touchToRoot(event).add(dragOffset);
       active.node.setPosition(this.constrain(point, active.node, surface));
+      setFocus(this.findTarget(active, targets, true));
     });
 
     const finish = (): void => {
       const item = active;
       active = null;
       if (!item || item.matched || this.callbacks.isCompleted()) {
+        focusedTarget = null;
         return;
       }
-      if (this.canSnap(item, items)) {
+
+      const target = this.findTarget(item, targets, false);
+      if (focusedTarget) {
+        this.callbacks.onTargetFocus?.(item, null);
+        focusedTarget = null;
+      }
+
+      if (target) {
         item.matched = true;
+        target.occupied = true;
         tween(item.node)
           .stop()
           .to(
-            0.2,
+            0.22,
             {
-              position: item.target,
+              position: target.position,
               scale: new Vec3(
-                item.matchedScale ?? 1,
-                item.matchedScale ?? 1,
+                target.matchedScale ?? 1,
+                target.matchedScale ?? 1,
                 1,
               ),
-              angle: item.targetAngle ?? 0,
+              angle: target.targetAngle ?? 0,
             },
             { easing: 'backOut' },
           )
           .call(() => {
-            if (item.matchedSiblingIndex !== undefined) {
-              item.node.setSiblingIndex(item.matchedSiblingIndex);
+            if (target.matchedSiblingIndex !== undefined) {
+              item.node.setSiblingIndex(target.matchedSiblingIndex);
             }
-            this.callbacks.onMatched?.(item);
+            this.callbacks.onMatched?.(item, target);
             if (items.every((candidate) => candidate.matched)) {
               this.callbacks.onAllMatched();
             }
@@ -85,6 +125,7 @@ export class MatchInteractionController {
           .start();
         return;
       }
+
       this.callbacks.onWrong?.(item);
       tween(item.node)
         .stop()
@@ -104,50 +145,44 @@ export class MatchInteractionController {
     surface.on(Node.EventType.TOUCH_CANCEL, finish);
   }
 
-  private canSnap(item: MatchItemState, items: MatchItemState[]): boolean {
-    if (item.dropArea) {
-      const { center, width, height } = item.dropArea;
-      return Math.abs(item.node.position.x - center.x) <= width / 2
-        && Math.abs(item.node.position.y - center.y) <= height / 2;
-    }
-    const compatible = item.matchKey
-      ? items.filter((candidate) => !candidate.matched && candidate.matchKey === item.matchKey)
-      : [item];
-    let nearest: MatchItemState | null = null;
+  private findTarget(
+    item: MatchItemState,
+    targets: MatchTargetState[],
+    allowNearHover: boolean,
+  ): MatchTargetState | null {
+    let nearest: MatchTargetState | null = null;
     let nearestDistance = Number.POSITIVE_INFINITY;
-    for (const candidate of compatible) {
-      const dropTarget = candidate.dropTarget ?? candidate.target;
-      const distance = Vec3.distance(item.node.position, dropTarget);
-      if (distance <= candidate.snapDistance && distance < nearestDistance) {
-        nearest = candidate;
+
+    for (const target of targets) {
+      if (target.occupied || !this.canMatch(item, target)) {
+        continue;
+      }
+      const distance = Vec3.distance(item.node.position, target.position);
+      const inside = target.dropArea
+        ? this.isInside(item.node.position, target.dropArea)
+        : distance <= target.snapDistance;
+      const hoverDistance = target.snapDistance * 1.45;
+      const eligible = inside || (allowNearHover && distance <= hoverDistance);
+      if (eligible && distance < nearestDistance) {
+        nearest = target;
         nearestDistance = distance;
       }
     }
-    if (!nearest) {
-      return false;
-    }
-    if (nearest !== item) {
-      this.swapTargets(item, nearest);
-    }
-    return true;
+    return nearest;
   }
 
-  private swapTargets(left: MatchItemState, right: MatchItemState): void {
-    const keys: Array<keyof MatchItemState> = [
-      'target',
-      'dropTarget',
-      'dropArea',
-      'snapDistance',
-      'matchedScale',
-      'matchedSiblingIndex',
-      'targetAngle',
-      'restScale',
-    ];
-    for (const key of keys) {
-      const value = left[key];
-      (left as any)[key] = right[key];
-      (right as any)[key] = value;
+  private canMatch(item: MatchItemState, target: MatchTargetState): boolean {
+    return this.callbacks.canMatch
+      ? this.callbacks.canMatch(item, target)
+      : item.matchKey === target.matchKey;
+  }
+
+  private isInside(position: Vec3, area: MatchTargetState['dropArea']): boolean {
+    if (!area) {
+      return false;
     }
+    return Math.abs(position.x - area.center.x) <= area.width / 2
+      && Math.abs(position.y - area.center.y) <= area.height / 2;
   }
 
   private pickItem(point: Vec3, items: MatchItemState[]): MatchItemState | null {
@@ -159,8 +194,10 @@ export class MatchInteractionController {
       if (!transform) {
         continue;
       }
-      const halfWidth = transform.width * 0.55;
-      const halfHeight = transform.height * 0.55;
+      const scaleX = Math.abs(item.node.scale.x || 1);
+      const scaleY = Math.abs(item.node.scale.y || 1);
+      const halfWidth = transform.width * scaleX * 0.62;
+      const halfHeight = transform.height * scaleY * 0.62;
       if (
         Math.abs(point.x - item.node.position.x) <= halfWidth
         && Math.abs(point.y - item.node.position.y) <= halfHeight
@@ -174,8 +211,8 @@ export class MatchInteractionController {
   private constrain(position: Vec3, node: Node, surface: Node): Vec3 {
     const surfaceSize = surface.getComponent(UITransform)!;
     const nodeSize = node.getComponent(UITransform)!;
-    const marginX = nodeSize.width * 0.35;
-    const marginY = nodeSize.height * 0.35;
+    const marginX = nodeSize.width * Math.abs(node.scale.x || 1) * 0.28;
+    const marginY = nodeSize.height * Math.abs(node.scale.y || 1) * 0.28;
     return new Vec3(
       Math.max(-surfaceSize.width / 2 + marginX, Math.min(surfaceSize.width / 2 - marginX, position.x)),
       Math.max(-surfaceSize.height / 2 + marginY, Math.min(surfaceSize.height / 2 - marginY, position.y)),
