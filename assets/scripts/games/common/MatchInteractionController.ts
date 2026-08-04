@@ -188,7 +188,7 @@ export class MatchInteractionController {
 
   private pickItem(point: Vec3, items: MatchItemState[]): MatchItemState | null {
     const candidates = items
-      .filter((item) => !item.matched)
+      .filter((item) => !item.matched && item.node.activeInHierarchy)
       .sort((left, right) => right.node.getSiblingIndex() - left.node.getSiblingIndex());
     for (const item of candidates) {
       const transform = item.node.getComponent(UITransform);
