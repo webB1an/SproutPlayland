@@ -103,7 +103,6 @@ export class ShapeGamePage extends MatchGamePageBase {
     const boardScale = count === 4 ? 1.45 : count === 6 ? 1.28 : 1.08;
     const shapeSize = 96;
     const targetOpacity = difficulty === 1 ? 152 : difficulty === 2 ? 104 : 68;
-    const targetLayerBase = root.children.length;
 
     const targets: ShapeTarget[] = placements.map((placement, index) => {
       const position = new Vec3(
@@ -141,7 +140,7 @@ export class ShapeGamePage extends MatchGamePageBase {
       );
       hint.angle = placement.angle ?? 0;
       hint.addComponent(UIOpacity).opacity = targetOpacity;
-      this.playSlotIdle(targetRoot, level.completionEffect, index);
+      this.playSlotIdle(hint, level.completionEffect, index);
       return {
         id: `shape-target-${index}`,
         node: targetRoot,
@@ -154,13 +153,18 @@ export class ShapeGamePage extends MatchGamePageBase {
         },
         snapDistance: Math.max(74, visualSize * 0.86),
         matchedScale: finalScale,
-        matchedSiblingIndex: targetLayerBase + index,
+        matchedSiblingIndex: undefined,
         targetAngle: placement.angle ?? 0,
         occupied: false,
         progressIndex: index,
         hint,
         glow,
       };
+    });
+
+    const pieceLayerBase = root.children.length;
+    targets.forEach((target, index) => {
+      target.matchedSiblingIndex = pieceLayerBase + index;
     });
 
     this.createPanel(
