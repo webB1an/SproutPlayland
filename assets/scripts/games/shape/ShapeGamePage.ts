@@ -1,25 +1,40 @@
-import { Color, Node, Sprite, tween, UIOpacity, Vec3 } from 'cc';
+import {
+  Color,
+  Node,
+  tween,
+  UIOpacity,
+  Vec3,
+} from 'cc';
 import { MatchGamePageBase } from '../common/MatchGamePageBase';
-import type { MatchItemState } from '../common/MatchTypes';
+import type {
+  MatchItemState,
+  MatchTargetState,
+  ToyShape,
+} from '../common/MatchTypes';
+import { getShapeCount, getShapeSceneLayout } from './ShapeConfig';
 import type { ShapeGameFlow } from './ShapeGameFlow';
+import type {
+  ShapeCompletionEffect,
+  ShapeLevelConfig,
+} from './ShapeTypes';
 
-type TurtlePartSpec = {
-  id: string;
-  frame: string;
-  target: Vec3;
-  start: Vec3;
-  width: number;
-  height: number;
-  trayScale: number;
-  restAngle: number;
-};
-
-type TurtlePartItem = MatchItemState & {
+type ShapeTarget = MatchTargetState & {
   progressIndex: number;
-  targetHint: Node;
+  hint: Node;
+  glow: Node;
 };
 
-/** 森林小医生：把散落的柔软部件送回小乌龟身上。 */
+type ShapeItem = MatchItemState & {
+  shape: ToyShape;
+  progressIndex: number;
+};
+
+type Point = { x: number; y: number };
+
+/**
+ * 积木造物：使用真正的圆形、方形、三角形等积木搭出完整作品。
+ * 关卡数据来自 ShapeConfig，不再固定为同一只乌龟。
+ */
 export class ShapeGamePage extends MatchGamePageBase {
   private readonly flow!: ShapeGameFlow;
 
@@ -30,157 +45,410 @@ export class ShapeGamePage extends MatchGamePageBase {
 
   show(): void {
     this.matchCompleted = false;
+    const level = this.flow.getCurrentLevel();
     const difficulty = this.flow.getDifficulty();
+    const count = getShapeCount(difficulty);
+    const placements = getShapeSceneLayout(level, count);
+    const shapes = level.shapes.slice(0, count);
+    const colors = level.colors.slice(0, count);
     const root = this.resetScreen('ShapeGame');
-    this.drawFullBackground(root, new Color(219, 240, 248, 255));
-    const backdrop = this.createCoverImage(
-      root,
-      this.frames.has('forest-turtle-board-bg') ? 'forest-turtle-board-bg' : 'shape-workshop-bg',
-      0,
-      0,
-      this.visibleWidth,
-      this.designHeight,
-    );
-    backdrop.name = 'ForestTurtleBoard';
-    this.createBackButton(root, () => this.flow.showSelect());
 
-    const parts = this.getTurtleParts();
-    const progress = this.createPanel(root, 'PartProgress', 0, 330, 278, 58, new Color(255, 252, 226, 238), 28);
-    const progressIcons: Node[] = [];
-    for (let index = 0; index < parts.length; index++) {
-      const spec = parts[index];
-      const icon = this.createImage(progress, spec.frame, (index - 1.5) * 56, 0, 48, 48);
-      icon.addComponent(UIOpacity).opacity = 76;
-      progressIcons.push(icon);
+    this.drawFullBackground(root, level.background);
+    if (this.frames.has('shape-workshop-bg')) {
+      const backdrop = this.createCoverImage(
+        root,
+        'shape-workshop-bg',
+        0,
+        0,
+        this.visibleWidth,
+        this.designHeight,
+      );
+      backdrop.name = 'ShapeWorkshopBackdrop';
+      backdrop.addComponent(UIOpacity).opacity = 218;
     }
 
-    const hintOpacity = difficulty === 1 ? 112 : difficulty === 2 ? 72 : 42;
-    const targetHints = parts.map((spec, index) => {
-      const hint = this.createImage(root, spec.frame, spec.target.x, spec.target.y, spec.width, spec.height);
-      hint.name = `TurtlePartHint${index}`;
-      hint.addComponent(UIOpacity).opacity = hintOpacity;
-      return hint;
-    });
+    this.createPanel(
+      root,
+      'ShapeBuildBoardShadow',
+      0,
+      38,
+      Math.min(this.visibleWidth - 130, 1000),
+      548,
+      new Color(70, 80, 73, 28),
+      48,
+    );
+    this.createPanel(
+      root,
+      'ShapeBuildBoard',
+      0,
+      49,
+      Math.min(this.visibleWidth - 130, 1000),
+      548,
+      new Color(255, 253, 237, 236),
+      48,
+      new Color(level.accent.r, level.accent.g, level.accent.b, 88),
+      5,
+    );
 
-    const order = this.shuffle(parts.map((_, index) => index));
-    const pieceLayerBase = root.children.length;
-    const items: TurtlePartItem[] = order.map((partIndex, displayIndex) => {
-      const spec = parts[partIndex];
-      const shuffledStart = parts[displayIndex].start;
-      const piece = this.createImage(root, spec.frame, shuffledStart.x, shuffledStart.y, spec.width, spec.height);
-      piece.name = `TurtlePart${spec.id}`;
-      const difficultyTurn = difficulty === 1 ? 0 : difficulty === 2 ? spec.restAngle : spec.restAngle * 1.7;
-      piece.angle = difficultyTurn;
-      piece.setScale(new Vec3(spec.trayScale * 0.7, spec.trayScale * 0.7, 1));
-      tween(piece)
-        .delay(0.18 + displayIndex * 0.08)
-        .to(0.42, { scale: new Vec3(spec.trayScale, spec.trayScale, 1) }, { easing: 'backOut' })
-        .start();
+    const referenceOpacity = difficulty === 1 ? 64 : difficulty === 2 ? 28 : 0;
+    if (referenceOpacity > 0 && this.frames.has(level.referenceFrame)) {
+      const reference = this.createCoverImage(root, level.referenceFrame, 0, 52, 410, 410, 34);
+      reference.name = 'ShapeReferenceArtwork';
+      reference.addComponent(UIOpacity).opacity = referenceOpacity;
+    }
+
+    this.createBackButton(root, () => this.flow.showSelect());
+    const progressDots = this.createProgressDots(root, shapes, colors);
+
+    const boardScale = count === 4 ? 1.45 : count === 6 ? 1.28 : 1.08;
+    const shapeSize = 96;
+    const targetOpacity = difficulty === 1 ? 152 : difficulty === 2 ? 104 : 68;
+    const targetLayerBase = root.children.length;
+
+    const targets: ShapeTarget[] = placements.map((placement, index) => {
+      const position = new Vec3(
+        placement.x * boardScale,
+        placement.y * boardScale + 42,
+      );
+      const finalScale = Math.max(0.15, placement.scale * boardScale * 0.92);
+      const visualSize = shapeSize * finalScale;
+      const targetRoot = this.createUiNode(
+        `ShapeTarget${index}`,
+        root,
+        position.x,
+        position.y,
+        Math.max(70, visualSize + 44),
+        Math.max(70, visualSize + 44),
+      );
+      const glow = this.createCircle(
+        targetRoot,
+        0,
+        -2,
+        Math.max(34, visualSize * 0.58),
+        new Color(colors[index].r, colors[index].g, colors[index].b, 28),
+      );
+      glow.name = `ShapeTargetGlow${index}`;
+      const hint = this.createToyShapeLayer(
+        targetRoot,
+        `ShapeTargetHint${index}`,
+        0,
+        0,
+        Math.max(26, visualSize),
+        shapes[index],
+        new Color(colors[index].r, colors[index].g, colors[index].b, 255),
+        new Color(89, 85, 73, difficulty === 3 ? 145 : 88),
+        difficulty === 3 ? 5 : 3,
+      );
+      hint.angle = placement.angle ?? 0;
+      hint.addComponent(UIOpacity).opacity = targetOpacity;
+      this.playSlotIdle(targetRoot, level.completionEffect, index);
       return {
-        node: piece,
-        start: shuffledStart,
-        target: spec.target,
+        id: `shape-target-${index}`,
+        node: targetRoot,
+        position,
+        matchKey: `shape-${shapes[index]}`,
         dropArea: {
-          center: spec.target,
-          width: difficulty === 1 ? spec.width + 120 : difficulty === 2 ? spec.width + 82 : spec.width + 54,
-          height: difficulty === 1 ? spec.height + 100 : difficulty === 2 ? spec.height + 70 : spec.height + 48,
+          center: position,
+          width: Math.max(90, visualSize + (difficulty === 1 ? 88 : difficulty === 2 ? 62 : 42)),
+          height: Math.max(90, visualSize + (difficulty === 1 ? 88 : difficulty === 2 ? 62 : 42)),
         },
-        snapDistance: difficulty === 1 ? 96 : difficulty === 2 ? 76 : 62,
-        matchedScale: 1,
-        matchedSiblingIndex: pieceLayerBase + partIndex,
-        targetAngle: 0,
-        restAngle: difficultyTurn,
-        restScale: spec.trayScale,
-        matched: false,
-        progressIndex: partIndex,
-        targetHint: targetHints[partIndex],
+        snapDistance: Math.max(74, visualSize * 0.86),
+        matchedScale: finalScale,
+        matchedSiblingIndex: targetLayerBase + index,
+        targetAngle: placement.angle ?? 0,
+        occupied: false,
+        progressIndex: index,
+        hint,
+        glow,
       };
     });
 
-    this.createHelpButton(root, () => this.playHint(items));
-    this.bindMatchGame(root, items, {
+    this.createPanel(
+      root,
+      'ShapeToyTrayShadow',
+      0,
+      -290,
+      Math.min(this.visibleWidth - 150, 1050),
+      150,
+      new Color(76, 57, 38, 30),
+      48,
+    );
+    this.createPanel(
+      root,
+      'ShapeToyTray',
+      0,
+      -280,
+      Math.min(this.visibleWidth - 150, 1050),
+      150,
+      new Color(255, 246, 218, 247),
+      48,
+      new Color(216, 171, 104, 186),
+      5,
+    );
+
+    const starts = this.getItemStarts(count);
+    const order = this.shuffle(Array.from({ length: count }, (_, index) => index));
+    const restScale = count === 4 ? 0.82 : count === 6 ? 0.72 : 0.62;
+    const items: ShapeItem[] = order.map((partIndex, displayIndex) => {
+      const start = new Vec3(starts[displayIndex].x, starts[displayIndex].y);
+      const restAngle = difficulty === 1
+        ? 0
+        : (displayIndex % 2 === 0 ? -1 : 1) * (difficulty === 2 ? 9 : 18);
+      const piece = this.createToyPiece(
+        root,
+        `ShapePiece${partIndex}`,
+        start.x,
+        start.y,
+        shapeSize,
+        shapes[partIndex],
+        colors[partIndex],
+        restAngle,
+      );
+      piece.setScale(new Vec3(restScale * 0.58, restScale * 0.58, 1));
+      tween(piece)
+        .delay(0.12 + displayIndex * 0.065)
+        .to(0.36, { scale: new Vec3(restScale, restScale, 1) }, { easing: 'backOut' })
+        .start();
+      return {
+        id: `shape-item-${partIndex}`,
+        node: piece,
+        start,
+        matchKey: `shape-${shapes[partIndex]}`,
+        restAngle,
+        restScale,
+        matched: false,
+        shape: shapes[partIndex],
+        progressIndex: partIndex,
+      };
+    });
+
+    this.createHelpButton(root, () => this.playHint(items, targets));
+    this.bindMatchGame(root, items, targets, {
       complete: () => this.flow.complete(),
       replay: () => this.flow.replay(),
       select: () => this.flow.showSelect(),
       next: () => this.flow.next(),
-      onPickup: (item) => this.focusTarget(item as TurtlePartItem, hintOpacity),
-      onWrong: (item) => this.playWrongFeedback(item as TurtlePartItem, hintOpacity),
-      onMatched: (item) => {
-        const part = item as TurtlePartItem;
-        part.targetHint.getComponent(UIOpacity)!.opacity = 0;
-        const icon = progressIcons[part.progressIndex];
-        icon.getComponent(UIOpacity)!.opacity = 255;
-        tween(icon)
-          .to(0.16, { scale: new Vec3(1.2, 1.2, 1) }, { easing: 'quadOut' })
-          .to(0.24, { scale: Vec3.ONE }, { easing: 'backOut' })
-          .start();
-        tween(part.node)
-          .to(0.14, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'quadOut' })
-          .to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' })
-          .start();
-      },
+      onPickup: (item) => this.focusCompatibleTargets(item, targets),
+      onTargetFocus: (_item, target) => this.focusHoveredTarget(target as ShapeTarget | null, targets),
+      onWrong: (item) => this.playWrongFeedback(item as ShapeItem, targets),
+      onMatched: (item, target) => this.playMatchedFeedback(
+        item as ShapeItem,
+        target as ShapeTarget,
+        progressDots,
+        level,
+      ),
+      beforeCelebrate: (done) => this.playSceneCompletion(level.completionEffect, items, done),
     });
   }
 
-  private getTurtleParts(): TurtlePartSpec[] {
-    return [
-      {
-        id: 'shell', frame: 'turtle-shell', target: new Vec3(113, 114), start: new Vec3(-285, -166),
-        width: 250, height: 112, trayScale: 0.7, restAngle: -9,
-      },
-      {
-        id: 'wing', frame: 'turtle-wing', target: new Vec3(129, 24), start: new Vec3(-95, -166),
-        width: 120, height: 90, trayScale: 0.92, restAngle: 11,
-      },
-      {
-        id: 'leg', frame: 'turtle-leg', target: new Vec3(-28, 16), start: new Vec3(100, -166),
-        width: 120, height: 160, trayScale: 0.78, restAngle: -8,
-      },
-      {
-        id: 'ear', frame: 'turtle-ear', target: new Vec3(-22, 270), start: new Vec3(290, -166),
-        width: 61, height: 138, trayScale: 0.84, restAngle: 10,
-      },
-    ];
+  private createProgressDots(
+    parent: Node,
+    shapes: readonly ToyShape[],
+    colors: readonly Color[],
+  ): Node[] {
+    const size = shapes.length >= 8 ? 26 : 30;
+    const gap = shapes.length >= 8 ? 38 : 44;
+    const panel = this.createPanel(
+      parent,
+      'ShapeProgress',
+      0,
+      329,
+      shapes.length * gap + 40,
+      58,
+      new Color(255, 252, 232, 232),
+      28,
+    );
+    return shapes.map((shape, index) => {
+      const icon = this.createToyShapeLayer(
+        panel,
+        `ShapeProgressIcon${index}`,
+        (index - (shapes.length - 1) / 2) * gap,
+        0,
+        size,
+        shape,
+        colors[index],
+      );
+      icon.addComponent(UIOpacity).opacity = 62;
+      return icon;
+    });
   }
 
-  private focusTarget(item: TurtlePartItem, baseOpacity: number): void {
-    const opacity = item.targetHint.getComponent(UIOpacity)!;
-    opacity.opacity = Math.max(150, baseOpacity);
-    tween(item.targetHint)
-      .stop()
-      .to(0.16, { scale: new Vec3(1.08, 1.08, 1) }, { easing: 'quadOut' })
-      .to(0.24, { scale: Vec3.ONE }, { easing: 'backOut' })
-      .start();
+  private focusCompatibleTargets(item: MatchItemState, targets: ShapeTarget[]): void {
+    for (const target of targets) {
+      if (target.occupied) continue;
+      const active = target.matchKey === item.matchKey;
+      const opacity = target.glow.getComponent(UIOpacity) ?? target.glow.addComponent(UIOpacity);
+      tween(opacity).stop().to(0.12, { opacity: active ? 248 : 72 }).start();
+    }
   }
 
-  private playWrongFeedback(item: TurtlePartItem, baseOpacity: number): void {
-    item.targetHint.getComponent(UIOpacity)!.opacity = Math.max(126, baseOpacity);
-    const origin = item.targetHint.position.clone();
-    tween(item.targetHint)
+  private focusHoveredTarget(target: ShapeTarget | null, targets: ShapeTarget[]): void {
+    for (const candidate of targets) {
+      if (candidate.occupied) continue;
+      const active = candidate === target;
+      tween(candidate.node)
+        .stop()
+        .to(0.12, { scale: active ? new Vec3(1.07, 1.07, 1) : Vec3.ONE }, { easing: 'quadOut' })
+        .start();
+      const opacity = candidate.glow.getComponent(UIOpacity) ?? candidate.glow.addComponent(UIOpacity);
+      tween(opacity).stop().to(0.12, { opacity: active ? 255 : 82 }).start();
+    }
+  }
+
+  private playWrongFeedback(item: ShapeItem, targets: ShapeTarget[]): void {
+    const target = targets.find((candidate) => !candidate.occupied && candidate.matchKey === item.matchKey);
+    if (!target) return;
+    const origin = target.hint.position.clone();
+    tween(target.hint)
       .stop()
       .to(0.07, { position: origin.clone().add3f(-8, 0, 0) })
       .to(0.07, { position: origin.clone().add3f(8, 0, 0) })
       .to(0.08, { position: origin })
-      .call(() => { item.targetHint.getComponent(UIOpacity)!.opacity = baseOpacity; })
       .start();
   }
 
-  private playHint(items: TurtlePartItem[]): void {
+  private playMatchedFeedback(
+    item: ShapeItem,
+    target: ShapeTarget,
+    progressDots: Node[],
+    level: ShapeLevelConfig,
+  ): void {
+    target.hint.getComponent(UIOpacity)!.opacity = 0;
+    const glowOpacity = target.glow.getComponent(UIOpacity) ?? target.glow.addComponent(UIOpacity);
+    tween(glowOpacity).to(0.2, { opacity: 0 }).start();
+
+    const progress = progressDots[target.progressIndex];
+    progress.getComponent(UIOpacity)!.opacity = 255;
+    tween(progress)
+      .to(0.13, { scale: new Vec3(1.32, 1.32, 1) })
+      .to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' })
+      .start();
+
+    const homeScale = item.node.scale.clone();
+    tween(item.node)
+      .to(0.13, { scale: homeScale.clone().multiplyScalar(1.12) }, { easing: 'quadOut' })
+      .to(0.22, { scale: homeScale }, { easing: 'backOut' })
+      .start();
+    this.createSettleSparkles(item.node, level.accent);
+  }
+
+  private createSettleSparkles(node: Node, accent: Color): void {
+    for (let index = 0; index < 5; index++) {
+      const angle = Math.PI * 2 * index / 5;
+      const sparkle = this.createCircle(
+        node.parent!,
+        node.position.x,
+        node.position.y,
+        5 + index % 2 * 2,
+        new Color(accent.r, accent.g, accent.b, 210),
+      );
+      const destination = node.position.clone().add3f(
+        Math.cos(angle) * 58,
+        Math.sin(angle) * 58,
+        0,
+      );
+      const opacity = sparkle.addComponent(UIOpacity);
+      tween(sparkle).to(0.34, { position: destination, scale: new Vec3(0.45, 0.45, 1) }, { easing: 'quadOut' }).start();
+      tween(opacity).to(0.34, { opacity: 0 }).call(() => sparkle.isValid && sparkle.destroy()).start();
+    }
+  }
+
+  private playSceneCompletion(
+    effect: ShapeCompletionEffect,
+    items: ShapeItem[],
+    done: () => void,
+  ): void {
+    items.forEach((item, index) => {
+      const node = item.node;
+      const origin = node.position.clone();
+      const homeScale = node.scale.clone();
+      const delay = index * 0.035;
+
+      if (effect === 'launch') {
+        tween(node).delay(delay).to(0.78, {
+          position: origin.clone().add3f(0, 230, 0),
+          scale: homeScale.clone().multiplyScalar(0.82),
+        }, { easing: 'quadIn' }).start();
+        return;
+      }
+      if (effect === 'drive' || effect === 'swim') {
+        tween(node).delay(delay).to(0.72, {
+          position: origin.clone().add3f(230, effect === 'swim' ? (index % 2 === 0 ? 18 : -18) : 0, 0),
+          angle: effect === 'drive' ? 4 : 0,
+        }, { easing: 'quadInOut' }).start();
+        return;
+      }
+      if (effect === 'flutter') {
+        tween(node)
+          .delay(delay)
+          .to(0.22, { position: origin.clone().add3f(-18, 38, 0), angle: -12 })
+          .to(0.22, { position: origin.clone().add3f(20, 72, 0), angle: 12 })
+          .to(0.22, { position: origin.clone().add3f(0, 98, 0), angle: 0 })
+          .start();
+        return;
+      }
+      if (effect === 'dance' || effect === 'party' || effect === 'sail') {
+        tween(node)
+          .delay(delay)
+          .to(0.16, { angle: -11, position: origin.clone().add3f(0, 20, 0) })
+          .to(0.16, { angle: 11, position: origin.clone().add3f(0, 30, 0) })
+          .to(0.18, { angle: 0, position: origin })
+          .start();
+        return;
+      }
+      tween(node)
+        .delay(delay)
+        .to(0.2, { scale: homeScale.clone().multiplyScalar(1.16), position: origin.clone().add3f(0, 20, 0) }, { easing: 'quadOut' })
+        .to(0.28, { scale: homeScale, position: origin }, { easing: 'backOut' })
+        .start();
+    });
+
+    const completionClock = items[0]?.node;
+    if (!completionClock) {
+      done();
+      return;
+    }
+    tween(completionClock).delay(1.05).call(done).start();
+  }
+
+  private playHint(items: ShapeItem[], targets: ShapeTarget[]): void {
     const item = items.find((candidate) => !candidate.matched);
     if (!item) return;
-    const current = item.node.position.clone();
-    const direction = item.target.clone().subtract(current).multiplyScalar(0.2);
-    this.focusTarget(item, item.targetHint.getComponent(UIOpacity)!.opacity);
+    const target = targets.find((candidate) => !candidate.occupied && candidate.matchKey === item.matchKey);
+    if (!target) return;
+    this.focusHoveredTarget(target, targets);
+    const start = item.node.position.clone();
+    const direction = target.position.clone().subtract(start).multiplyScalar(0.22);
+    const restScale = item.restScale ?? 1;
     tween(item.node)
       .stop()
-      .to(0.28, { position: current.clone().add(direction), scale: new Vec3(1.05, 1.05, 1) }, { easing: 'quadOut' })
-      .to(0.38, { position: current, scale: new Vec3(this.getTrayScale(item), this.getTrayScale(item), 1) }, { easing: 'backOut' })
+      .to(0.28, { position: start.clone().add(direction), scale: new Vec3(restScale * 1.08, restScale * 1.08, 1) }, { easing: 'quadOut' })
+      .to(0.36, { position: start, scale: new Vec3(restScale, restScale, 1) }, { easing: 'backOut' })
+      .call(() => this.focusHoveredTarget(null, targets))
       .start();
   }
 
-  private getTrayScale(item: TurtlePartItem): number {
-    const part = this.getTurtleParts()[item.progressIndex];
-    return part?.trayScale ?? 1;
+  private playSlotIdle(node: Node, effect: ShapeCompletionEffect, index: number): void {
+    if (effect !== 'sail' && effect !== 'flutter' && effect !== 'swim') {
+      return;
+    }
+    const origin = node.position.clone();
+    tween(node)
+      .delay(index * 0.06)
+      .repeatForever(
+        tween<Node>()
+          .to(1.2, { position: origin.clone().add3f(0, 4 + index % 2 * 2, 0) }, { easing: 'sineInOut' })
+          .to(1.2, { position: origin }, { easing: 'sineInOut' }),
+      )
+      .start();
+  }
+
+  private getItemStarts(count: number): Point[] {
+    const gap = count === 4 ? 190 : count === 6 ? 142 : 112;
+    return Array.from({ length: count }, (_, index) => ({
+      x: (index - (count - 1) / 2) * gap,
+      y: -280 + (index % 2 === 0 ? 5 : -5),
+    }));
   }
 
   private shuffle<T>(values: T[]): T[] {
