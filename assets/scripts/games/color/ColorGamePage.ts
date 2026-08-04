@@ -1,7 +1,7 @@
 import {
   Color,
+  Graphics,
   Node,
-  Sprite,
   tween,
   UIOpacity,
   Vec3,
@@ -10,29 +10,44 @@ import { MatchGamePageBase } from '../common/MatchGamePageBase';
 import type {
   MatchItemState,
   MatchTargetState,
-  ToyShape,
 } from '../common/MatchTypes';
-import { getColorGroupCount } from './ColorConfig';
+import { getColorStage } from './ColorConfig';
 import type { ColorGameFlow } from './ColorGameFlow';
-import type { ColorCompletionEffect, ColorLevelConfig } from './ColorTypes';
+import type {
+  ColorCelebration,
+  ColorCue,
+  ColorLevelConfig,
+  ColorSceneKind,
+  ColorToken,
+} from './ColorTypes';
 
 type ColorTarget = MatchTargetState & {
-  groupIndex: number;
+  token: ColorToken;
+  greyLayer: Node;
+  colorLayer: Node;
+  cue: Node;
   glow: Node;
-  ghost: Node;
-  marker: Node;
+  progressIndex: number;
 };
 
 type ColorItem = MatchItemState & {
-  groupIndex: number;
-  marker: Node;
+  token: ColorToken;
+  cue: Node;
+  displayIndex: number;
 };
 
 type Point = { x: number; y: number };
 
+type SceneObject = {
+  greyLayer: Node;
+  colorLayer: Node;
+  cue: Node;
+  glow: Node;
+};
+
 /**
- * 颜色唤醒：把彩色玩具送入场景，让灰色目标逐个恢复颜色。
- * 不再使用永久答案路线，每次正确操作都会让主题对象“活起来”。
+ * 色彩魔法 V3：孩子拖动可爱的颜料精灵，让灰色场景逐步恢复颜色。
+ * 选关主题、游戏主体和完成动画使用同一个 sceneKind，避免卡片与玩法脱节。
  */
 export class ColorGamePage extends MatchGamePageBase {
   private readonly flow!: ColorGameFlow;
@@ -46,172 +61,98 @@ export class ColorGamePage extends MatchGamePageBase {
     this.matchCompleted = false;
     const level = this.flow.getCurrentLevel();
     const difficulty = this.flow.getDifficulty();
-    const groupCount = getColorGroupCount(difficulty);
-    const colors = level.palette.slice(0, groupCount);
-    const markers = level.markerShapes.slice(0, groupCount);
-    const root = this.resetScreen('ColorGame');
+    const stage = getColorStage(level, difficulty);
+    const tokens = level.palette.slice(0, stage.itemCount);
+    const root = this.resetScreen('ColorGameV3');
 
     this.drawFullBackground(root, level.background);
-    if (this.frames.has(level.backgroundFrame)) {
-      const backdrop = this.createCoverImage(
-        root,
-        level.backgroundFrame,
-        0,
-        0,
-        this.visibleWidth,
-        this.designHeight,
-      );
-      backdrop.name = 'ColorThemeBackdrop';
-      backdrop.addComponent(UIOpacity).opacity = 205;
-    }
-
-    this.createPanel(
-      root,
-      'ColorStageWash',
-      0,
-      28,
-      Math.min(this.visibleWidth - 116, 1120),
-      560,
-      new Color(255, 255, 248, 188),
-      46,
-      new Color(level.accent.r, level.accent.g, level.accent.b, 78),
-      4,
-    );
+    this.drawOuterDecor(root, level);
     this.createBackButton(root, () => this.flow.showSelect());
+    this.createToyRibbon(root, level.title, 323, level.accent, 390);
+    this.createLabel(
+      root,
+      level.subtitle,
+      0,
+      279,
+      20,
+      new Color(103, 85, 72, 220),
+      620,
+      34,
+    );
 
-    const progressDots = this.createProgressDots(root, colors);
-    const targetPositions = this.getTargetPositions(groupCount);
-    const itemStarts = this.getItemStarts(groupCount);
-    const targetSize = groupCount >= 5 ? 110 : 128;
-    const itemSize = groupCount >= 5 ? 94 : 108;
-    const ghostOpacity = difficulty === 1 ? 150 : difficulty === 2 ? 106 : 72;
+    this.createStage(root, level);
+    const progressPips = this.createProgressPips(root, tokens.length, 240, level.accent);
+    const targetPositions = this.getTargetPositions(level.sceneKind, tokens.length);
+    const targetSize = this.getTargetSize(level.sceneKind, tokens.length);
 
-    const targets: ColorTarget[] = colors.map((color, groupIndex) => {
-      const position = new Vec3(targetPositions[groupIndex].x, targetPositions[groupIndex].y);
+    const targets: ColorTarget[] = tokens.map((token, index) => {
+      const position = new Vec3(targetPositions[index].x, targetPositions[index].y);
       const targetRoot = this.createUiNode(
-        `ColorTarget${groupIndex}`,
+        `ColorTarget-${token.id}`,
         root,
         position.x,
         position.y,
-        targetSize + 64,
-        targetSize + 64,
+        targetSize * 1.7,
+        targetSize * 1.7,
       );
-      const glow = this.createCircle(
+      const object = this.createSceneObject(
         targetRoot,
-        0,
-        -3,
-        targetSize * 0.62,
-        new Color(color.r, color.g, color.b, 36),
-      );
-      glow.name = `ColorTargetGlow${groupIndex}`;
-      const ghost = this.createThemeObject(
-        targetRoot,
-        `ColorTargetGhost${groupIndex}`,
-        level.targetFrame,
-        0,
-        0,
+        level.sceneKind,
         targetSize,
-        color,
-        markers[groupIndex],
-        ghostOpacity,
+        token,
+        stage.targetCueOpacity,
       );
-      const marker = this.createMarker(
-        targetRoot,
-        `ColorTargetMarker${groupIndex}`,
-        markers[groupIndex],
-        0,
-        0,
-        34,
-        new Color(255, 255, 250, 190),
-      );
-      marker.addComponent(UIOpacity).opacity = difficulty === 3 ? 118 : 220;
-      this.playTargetIdle(ghost, level.completionEffect, groupIndex);
-
+      this.playTargetIdle(targetRoot, level.sceneKind, index);
       return {
-        id: `color-target-${groupIndex}`,
+        id: `color-target-${token.id}`,
         node: targetRoot,
         position,
-        matchKey: `color-${groupIndex}`,
+        matchKey: token.id,
         dropArea: {
           center: position,
-          width: targetSize * 1.46,
-          height: targetSize * 1.42,
+          width: targetSize + stage.snapPadding,
+          height: targetSize + stage.snapPadding,
         },
-        snapDistance: targetSize * 0.82,
-        matchedScale: targetSize / itemSize,
+        snapDistance: targetSize * 0.9,
+        matchedScale: 0.38,
         targetAngle: 0,
         occupied: false,
-        groupIndex,
-        glow,
-        ghost,
-        marker,
+        token,
+        greyLayer: object.greyLayer,
+        colorLayer: object.colorLayer,
+        cue: object.cue,
+        glow: object.glow,
+        progressIndex: index,
       };
     });
 
-    this.createPanel(
-      root,
-      'ColorToyTrayShadow',
-      0,
-      -287,
-      Math.min(this.visibleWidth - 180, 920),
-      150,
-      new Color(79, 63, 43, 30),
-      48,
-    );
-    this.createPanel(
-      root,
-      'ColorToyTray',
-      0,
-      -278,
-      Math.min(this.visibleWidth - 180, 920),
-      150,
-      new Color(255, 247, 220, 246),
-      48,
-      new Color(219, 178, 108, 180),
-      5,
-    );
-
-    const order = this.shuffle(Array.from({ length: groupCount }, (_, index) => index));
-    const items: ColorItem[] = order.map((groupIndex, displayIndex) => {
-      const start = new Vec3(itemStarts[displayIndex].x, itemStarts[displayIndex].y);
-      const color = colors[groupIndex];
-      const restAngle = displayIndex % 2 === 0 ? -6 : 6;
-      const item = this.createThemeObject(
-        root,
-        `ColorToy${groupIndex}`,
-        level.itemFrame,
-        start.x,
-        start.y,
-        itemSize,
-        color,
-        markers[groupIndex],
-        255,
-      );
-      item.angle = restAngle;
-      const marker = this.createMarker(
-        item,
-        `ColorToyMarker${groupIndex}`,
-        markers[groupIndex],
-        0,
-        0,
-        31,
-        new Color(255, 255, 250, 205),
-      );
-      item.setScale(new Vec3(0.55, 0.55, 1));
-      tween(item)
-        .delay(0.12 + displayIndex * 0.07)
-        .to(0.34, { scale: Vec3.ONE }, { easing: 'backOut' })
-        .start();
+    const trayWidth = stage.presentOneByOne ? 430 : Math.min(1010, 410 + tokens.length * 128);
+    this.createToyTray(root, -286, trayWidth, level.accent, 132);
+    const order = this.shuffle(Array.from({ length: tokens.length }, (_, index) => index));
+    const starts = this.getTrayStarts(tokens.length, stage.presentOneByOne);
+    const items: ColorItem[] = order.map((tokenIndex, displayIndex) => {
+      const token = tokens[tokenIndex];
+      const start = new Vec3(starts[displayIndex].x, starts[displayIndex].y);
+      const restAngle = stage.presentOneByOne
+        ? 0
+        : (displayIndex % 2 === 0 ? -1 : 1) * stage.trayAngle;
+      const paint = this.createPaintToken(root, token, start.x, start.y, restAngle);
+      paint.active = !stage.presentOneByOne || displayIndex === 0;
+      if (paint.active) {
+        paint.setScale(new Vec3(0.55, 0.55, 1));
+        tween(paint).to(0.32, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
+      }
       return {
-        id: `color-item-${groupIndex}`,
-        node: item,
+        id: `color-item-${token.id}`,
+        node: paint,
         start,
-        matchKey: `color-${groupIndex}`,
+        matchKey: token.id,
         restAngle,
         restScale: 1,
         matched: false,
-        groupIndex,
-        marker,
+        token,
+        cue: paint.getChildByName('PaintCue')!,
+        displayIndex,
       };
     });
 
@@ -222,93 +163,361 @@ export class ColorGamePage extends MatchGamePageBase {
       select: () => this.flow.showSelect(),
       next: () => this.flow.next(),
       onPickup: (item) => this.focusCompatibleTargets(item, targets),
-      onTargetFocus: (_item, target) => this.focusHoveredTarget(target as ColorTarget | null, targets),
+      onTargetFocus: (_item, target) => {
+        this.focusHoveredTarget(target as ColorTarget | null, targets);
+      },
       onWrong: (item) => this.playWrongFeedback(item as ColorItem, targets),
-      onMatched: (item, target) => this.playMatchedFeedback(
-        item as ColorItem,
-        target as ColorTarget,
-        progressDots,
-        level,
-      ),
-      beforeCelebrate: (done) => this.playSceneCompletion(level.completionEffect, items, done),
+      onMatched: (item, target) => {
+        this.playMatchedFeedback(
+          item as ColorItem,
+          target as ColorTarget,
+          progressPips,
+          items,
+          stage.presentOneByOne,
+        );
+      },
+      beforeCelebrate: (done) => {
+        this.playSceneCompletion(level.celebration, targets, done);
+      },
     });
   }
 
-  private createProgressDots(parent: Node, colors: readonly Color[]): Node[] {
-    const panel = this.createPanel(
-      parent,
-      'ColorProgress',
-      0,
-      329,
-      colors.length * 50 + 42,
-      58,
-      new Color(255, 252, 232, 232),
-      28,
+  private drawOuterDecor(root: Node, level: ColorLevelConfig): void {
+    this.createCircle(
+      root,
+      -this.visibleWidth / 2 + 92,
+      -306,
+      166,
+      new Color(level.accent.r, level.accent.g, level.accent.b, 28),
     );
-    return colors.map((color, index) => {
-      const dot = this.createCircle(
-        panel,
-        (index - (colors.length - 1) / 2) * 48,
-        0,
-        14,
-        new Color(color.r, color.g, color.b, 255),
-      );
-      dot.addComponent(UIOpacity).opacity = 70;
-      return dot;
-    });
+    this.createCircle(
+      root,
+      this.visibleWidth / 2 - 88,
+      306,
+      132,
+      new Color(255, 206, 91, 35),
+    );
+    this.createSoftCloud(root, -500, 285, 0.55, 125);
+    this.createSoftCloud(root, 495, 205, 0.42, 100);
   }
 
-  private createThemeObject(
-    parent: Node,
-    name: string,
-    frame: string,
-    x: number,
-    y: number,
-    size: number,
-    color: Color,
-    fallbackShape: ToyShape,
-    opacity: number,
-  ): Node {
-    if (this.frames.has(frame)) {
-      const object = this.createImage(parent, frame, x, y, size, size);
-      object.name = name;
-      object.getComponent(Sprite)!.color = color;
-      object.addComponent(UIOpacity).opacity = opacity;
-      return object;
+  private createStage(root: Node, level: ColorLevelConfig): void {
+    const width = Math.min(1080, this.visibleWidth - 130);
+    const height = 470;
+    this.createPanel(root, 'ColorStageShadow', 8, 2, width, height, new Color(66, 64, 55, 38), 48);
+    this.createPanel(root, 'ColorStageSide', 0, 9, width, height, this.darken(level.accent, 0.78), 48);
+    const stage = this.createPanel(
+      root,
+      'ColorStage',
+      0,
+      18,
+      width,
+      height,
+      new Color(255, 254, 242, 255),
+      48,
+      new Color(255, 255, 255, 230),
+      5,
+    );
+    this.drawSceneBackdrop(stage, level.sceneKind, width, height, level);
+  }
+
+  private drawSceneBackdrop(
+    stage: Node,
+    kind: ColorSceneKind,
+    width: number,
+    height: number,
+    level: ColorLevelConfig,
+  ): void {
+    if (kind === 'fish') {
+      this.createPanel(stage, 'WaterWash', 0, 0, width - 18, height - 18, new Color(105, 211, 226, 75), 42);
+      for (let index = 0; index < 14; index++) {
+        const x = -width / 2 + 75 + (index * 79) % (width - 130);
+        const y = -170 + (index * 47) % 330;
+        this.createCircle(stage, x, y, 7 + index % 3 * 3, new Color(255, 255, 255, 105));
+      }
+      this.createPanel(stage, 'Sand', 0, -196, width - 24, 66, new Color(244, 218, 153, 150), 32);
+      this.createCoral(stage, -430, -150, level.accent);
+      this.createCoral(stage, 424, -160, new Color(244, 126, 145, 220));
+      return;
     }
-    const object = this.createToyPiece(parent, name, x, y, size * 0.78, fallbackShape, color);
-    object.addComponent(UIOpacity).opacity = opacity;
-    return object;
+
+    this.createSoftCloud(stage, -390, 150, 0.52, 145);
+    this.createSoftCloud(stage, 350, 125, 0.42, 125);
+    this.createCircle(stage, 418, 160, 45, new Color(255, 209, 74, 115));
+
+    if (kind === 'orchard') {
+      this.createPanel(stage, 'OrchardGround', 0, -190, width - 24, 82, new Color(139, 207, 105, 160), 35);
+      this.createPanel(stage, 'TreeTrunk', 0, -55, 70, 270, new Color(151, 101, 63, 255), 30);
+      this.createCircle(stage, -185, 90, 155, new Color(94, 181, 100, 235));
+      this.createCircle(stage, 0, 135, 190, new Color(103, 193, 107, 240));
+      this.createCircle(stage, 190, 82, 150, new Color(83, 169, 91, 235));
+      return;
+    }
+
+    if (kind === 'train') {
+      this.createPanel(stage, 'TrainGround', 0, -184, width - 24, 84, new Color(149, 207, 109, 140), 34);
+      this.createPanel(stage, 'RailOne', 0, -145, width - 90, 9, new Color(103, 84, 70, 180), 4);
+      this.createPanel(stage, 'RailTwo', 0, -190, width - 90, 9, new Color(103, 84, 70, 180), 4);
+      for (let index = 0; index < 15; index++) {
+        this.createPanel(stage, 'Sleeper', -470 + index * 67, -167, 34, 8, new Color(128, 88, 59, 150), 3);
+      }
+      this.createTrainEngine(stage, -430, -70, level.accent);
+      return;
+    }
+
+    this.createPanel(stage, 'BalloonGround', 0, -190, width - 24, 82, new Color(142, 208, 109, 155), 34);
+    this.createBunny(stage, -430, -118, 0.78);
   }
 
-  private createMarker(
+  private createSceneObject(
+    parent: Node,
+    kind: ColorSceneKind,
+    size: number,
+    token: ColorToken,
+    cueOpacity: number,
+  ): SceneObject {
+    const glow = this.createCircle(
+      parent,
+      0,
+      0,
+      size * 0.62,
+      new Color(token.color.r, token.color.g, token.color.b, 28),
+    );
+    glow.name = 'TargetGlow';
+    const glowOpacity = glow.addComponent(UIOpacity);
+    glowOpacity.opacity = 82;
+
+    const neutral = new Color(205, 211, 207, 255);
+    const greyLayer = this.createObjectLayer(parent, kind, size, neutral, false);
+    greyLayer.name = 'GreyObject';
+    const colorLayer = this.createObjectLayer(parent, kind, size, token.color, true);
+    colorLayer.name = 'ColorObject';
+    colorLayer.addComponent(UIOpacity).opacity = 0;
+
+    const cue = this.createColorCue(
+      parent,
+      'TargetCue',
+      token.cue,
+      0,
+      kind === 'train' ? 5 : 4,
+      Math.max(34, size * 0.29),
+      new Color(255, 255, 247, 230),
+      new Color(token.color.r, token.color.g, token.color.b, 230),
+    );
+    cue.addComponent(UIOpacity).opacity = cueOpacity;
+    return { greyLayer, colorLayer, cue, glow };
+  }
+
+  private createObjectLayer(
+    parent: Node,
+    kind: ColorSceneKind,
+    size: number,
+    color: Color,
+    showFace: boolean,
+  ): Node {
+    const layer = this.createUiNode(`ObjectLayer-${kind}`, parent, 0, 0, size * 1.6, size * 1.6);
+    if (kind === 'balloon') {
+      const body = this.createToyShapeLayer(
+        layer,
+        'BalloonBody',
+        0,
+        16,
+        size * 0.9,
+        'oval',
+        color,
+        new Color(255, 255, 247, 205),
+        4,
+      );
+      body.angle = 90;
+      const knot = this.createTriangle(layer, 0, -size * 0.37, size * 0.24, size * 0.2, this.darken(color, 0.85));
+      knot.angle = 180;
+      const string = this.createUiNode('BalloonString', layer, 0, -size * 0.67, size * 0.4, size * 0.7);
+      const graphics = string.addComponent(Graphics);
+      graphics.strokeColor = new Color(103, 86, 72, 145);
+      graphics.lineWidth = 3;
+      graphics.moveTo(0, size * 0.32);
+      graphics.quadraticCurveTo(size * 0.12, 0, 0, -size * 0.32);
+      graphics.stroke();
+      if (showFace) this.createCuteFace(layer, 0, 20, size * 0.23);
+      return layer;
+    }
+
+    if (kind === 'orchard') {
+      this.createToyShapeLayer(
+        layer,
+        'FruitBody',
+        0,
+        0,
+        size * 0.82,
+        'circle',
+        color,
+        new Color(255, 255, 247, 205),
+        4,
+      );
+      this.createPanel(layer, 'FruitStem', 0, size * 0.44, size * 0.09, size * 0.3, new Color(119, 83, 58, 255), 6);
+      const leaf = this.createToyShapeLayer(
+        layer,
+        'FruitLeaf',
+        size * 0.22,
+        size * 0.47,
+        size * 0.28,
+        'oval',
+        new Color(82, 171, 92, 255),
+      );
+      leaf.angle = 25;
+      if (showFace) this.createCuteFace(layer, 0, -3, size * 0.22);
+      return layer;
+    }
+
+    if (kind === 'fish') {
+      this.createToyShapeLayer(
+        layer,
+        'FishBody',
+        6,
+        0,
+        size * 0.86,
+        'oval',
+        color,
+        new Color(255, 255, 247, 205),
+        4,
+      );
+      const tail = this.createTriangle(
+        layer,
+        -size * 0.47,
+        0,
+        size * 0.38,
+        size * 0.48,
+        this.darken(color, 0.87),
+      );
+      tail.angle = -90;
+      this.createToyShapeLayer(
+        layer,
+        'FishFin',
+        5,
+        -size * 0.2,
+        size * 0.26,
+        'triangle',
+        this.darken(color, 0.9),
+      );
+      if (showFace) this.createCuteFace(layer, size * 0.18, 2, size * 0.19);
+      return layer;
+    }
+
+    this.createPanel(
+      layer,
+      'TrainCarBody',
+      0,
+      1,
+      size * 1.1,
+      size * 0.66,
+      color,
+      size * 0.17,
+      new Color(255, 255, 247, 205),
+      4,
+    );
+    this.createPanel(
+      layer,
+      'TrainCarRoof',
+      0,
+      size * 0.32,
+      size * 0.86,
+      size * 0.18,
+      this.darken(color, 0.86),
+      size * 0.09,
+    );
+    this.createCircle(layer, -size * 0.32, -size * 0.38, size * 0.14, new Color(70, 72, 78, 255));
+    this.createCircle(layer, size * 0.32, -size * 0.38, size * 0.14, new Color(70, 72, 78, 255));
+    this.createCircle(layer, -size * 0.32, -size * 0.38, size * 0.06, new Color(219, 224, 224, 255));
+    this.createCircle(layer, size * 0.32, -size * 0.38, size * 0.06, new Color(219, 224, 224, 255));
+    if (showFace) this.createCuteFace(layer, 0, 4, size * 0.18);
+    return layer;
+  }
+
+  private createPaintToken(
+    parent: Node,
+    token: ColorToken,
+    x: number,
+    y: number,
+    angle: number,
+  ): Node {
+    const paint = this.createUiNode(`Paint-${token.id}`, parent, x, y, 150, 150);
+    paint.angle = angle;
+    this.createCircle(paint, 7, -12, 58, new Color(67, 50, 39, 42));
+    this.createCircle(paint, 0, -7, 58, this.darken(token.color, 0.78));
+    this.createCircle(paint, 0, 0, 57, token.color);
+    this.createCircle(paint, -17, 19, 9, new Color(255, 255, 255, 150));
+    this.createCuteFace(paint, 0, -5, 22);
+    const cue = this.createColorCue(
+      paint,
+      'PaintCue',
+      token.cue,
+      0,
+      28,
+      28,
+      new Color(255, 255, 250, 230),
+      new Color(255, 255, 250, 230),
+    );
+    cue.setScale(new Vec3(0.82, 0.82, 1));
+    return paint;
+  }
+
+  private createColorCue(
     parent: Node,
     name: string,
-    shape: ToyShape,
+    cue: ColorCue,
     x: number,
     y: number,
     size: number,
-    color: Color,
+    fill: Color,
+    stroke: Color,
   ): Node {
-    return this.createToyShapeLayer(
-      parent,
-      name,
-      x,
-      y,
-      size,
-      shape,
-      color,
-      new Color(87, 72, 54, 44),
+    const node = this.createUiNode(name, parent, x, y, size * 1.9, size * 1.5);
+    if (cue === 'dots') {
+      [-0.32, 0, 0.32].forEach((offset) => {
+        this.createCircle(node, offset * size, 0, size * 0.12, fill);
+      });
+      return node;
+    }
+    if (cue === 'stripes') {
+      [-0.28, 0, 0.28].forEach((offset) => {
+        const stripe = this.createPanel(node, 'CueStripe', offset * size, 0, size * 0.13, size * 0.75, fill, size * 0.06);
+        stripe.angle = 18;
+      });
+      return node;
+    }
+    if (cue === 'waves') {
+      const graphics = node.addComponent(Graphics);
+      graphics.strokeColor = fill;
+      graphics.lineWidth = Math.max(3, size * 0.11);
+      for (let row = -1; row <= 1; row++) {
+        const yPos = row * size * 0.22;
+        graphics.moveTo(-size * 0.4, yPos);
+        graphics.bezierCurveTo(-size * 0.2, yPos + size * 0.15, 0, yPos - size * 0.15, size * 0.2, yPos);
+        graphics.bezierCurveTo(size * 0.28, yPos + size * 0.08, size * 0.34, yPos + size * 0.08, size * 0.4, yPos);
+      }
+      graphics.stroke();
+      return node;
+    }
+    this.createToyShapeLayer(
+      node,
+      'CueShape',
+      0,
+      0,
+      size * 0.72,
+      cue === 'heart' ? 'heart' : 'star',
+      fill,
+      stroke,
       2,
     );
+    return node;
   }
 
   private focusCompatibleTargets(item: MatchItemState, targets: ColorTarget[]): void {
     for (const target of targets) {
       if (target.occupied) continue;
+      const opacity = target.glow.getComponent(UIOpacity)!;
       const active = target.matchKey === item.matchKey;
-      const opacity = target.glow.getComponent(UIOpacity) ?? target.glow.addComponent(UIOpacity);
-      tween(opacity).stop().to(0.12, { opacity: active ? 245 : 82 }).start();
+      tween(opacity).stop().to(0.12, { opacity: active ? 250 : 64 }).start();
     }
   }
 
@@ -320,172 +529,234 @@ export class ColorGamePage extends MatchGamePageBase {
         .stop()
         .to(0.12, { scale: active ? new Vec3(1.08, 1.08, 1) : Vec3.ONE }, { easing: 'quadOut' })
         .start();
-      const opacity = candidate.glow.getComponent(UIOpacity) ?? candidate.glow.addComponent(UIOpacity);
-      tween(opacity).stop().to(0.12, { opacity: active ? 255 : 92 }).start();
+      tween(candidate.glow.getComponent(UIOpacity)!)
+        .stop()
+        .to(0.12, { opacity: active ? 255 : 82 })
+        .start();
     }
   }
 
   private playWrongFeedback(item: ColorItem, targets: ColorTarget[]): void {
     const target = targets.find((candidate) => !candidate.occupied && candidate.matchKey === item.matchKey);
     if (!target) return;
-    tween(target.marker)
+    tween(target.cue)
       .stop()
-      .to(0.08, { angle: -10, scale: new Vec3(1.12, 1.12, 1) })
+      .to(0.08, { angle: -10, scale: new Vec3(1.16, 1.16, 1) })
       .to(0.08, { angle: 10 })
-      .to(0.1, { angle: 0, scale: Vec3.ONE })
+      .to(0.12, { angle: 0, scale: Vec3.ONE }, { easing: 'backOut' })
       .start();
   }
 
   private playMatchedFeedback(
     item: ColorItem,
     target: ColorTarget,
-    progressDots: Node[],
-    level: ColorLevelConfig,
-  ): void {
-    target.ghost.getComponent(UIOpacity)!.opacity = 0;
-    target.marker.getComponent(UIOpacity)!.opacity = 0;
-    const glowOpacity = target.glow.getComponent(UIOpacity) ?? target.glow.addComponent(UIOpacity);
-    tween(glowOpacity).to(0.22, { opacity: 0 }).start();
-
-    const dot = progressDots[target.groupIndex];
-    dot.getComponent(UIOpacity)!.opacity = 255;
-    tween(dot)
-      .to(0.12, { scale: new Vec3(1.42, 1.42, 1) })
-      .to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' })
-      .start();
-
-    this.playObjectAwaken(item.node, level.completionEffect, target.groupIndex);
-  }
-
-  private playObjectAwaken(node: Node, effect: ColorCompletionEffect, index: number): void {
-    const home = node.position.clone();
-    const homeScale = node.scale.clone();
-    if (effect === 'float' || effect === 'flutter') {
-      tween(node)
-        .to(0.22, { position: home.clone().add3f(0, 26, 0), angle: index % 2 === 0 ? -7 : 7 }, { easing: 'sineOut' })
-        .to(0.26, { position: home, angle: 0 }, { easing: 'sineIn' })
-        .start();
-      return;
-    }
-    if (effect === 'swim' || effect === 'roll') {
-      tween(node)
-        .to(0.2, { position: home.clone().add3f(24, 0, 0), angle: effect === 'roll' ? 18 : 0 }, { easing: 'quadOut' })
-        .to(0.24, { position: home, angle: 0 }, { easing: 'backOut' })
-        .start();
-      return;
-    }
-    tween(node)
-      .to(0.14, { scale: homeScale.clone().multiplyScalar(1.18) }, { easing: 'quadOut' })
-      .to(0.24, { scale: homeScale }, { easing: 'backOut' })
-      .start();
-  }
-
-  private playSceneCompletion(
-    effect: ColorCompletionEffect,
+    progressPips: Node[],
     items: ColorItem[],
-    done: () => void,
+    presentOneByOne: boolean,
   ): void {
-    items.forEach((item, index) => {
-      const node = item.node;
-      const origin = node.position.clone();
-      const homeScale = node.scale.clone();
-      const delay = index * 0.07;
-      if (effect === 'float') {
-        tween(node).delay(delay).to(0.72, {
-          position: origin.clone().add3f((index - 2) * 18, 112 + index * 10, 0),
-          angle: index % 2 === 0 ? -12 : 12,
-        }, { easing: 'sineOut' }).start();
-        return;
+    tween(target.greyLayer.getComponent(UIOpacity) ?? target.greyLayer.addComponent(UIOpacity))
+      .to(0.22, { opacity: 0 })
+      .start();
+    tween(target.colorLayer.getComponent(UIOpacity)!)
+      .to(0.24, { opacity: 255 })
+      .start();
+    tween(target.cue.getComponent(UIOpacity)!)
+      .to(0.16, { opacity: 0 })
+      .start();
+    tween(target.glow.getComponent(UIOpacity)!)
+      .to(0.2, { opacity: 0 })
+      .start();
+
+    const itemOpacity = item.node.getComponent(UIOpacity) ?? item.node.addComponent(UIOpacity);
+    tween(itemOpacity).to(0.16, { opacity: 0 }).start();
+    tween(item.node)
+      .to(0.12, { scale: new Vec3(0.25, 0.25, 1) })
+      .call(() => { item.node.active = false; })
+      .start();
+
+    const pip = progressPips[target.progressIndex];
+    const filled = this.createCircle(pip, 0, 0, 11, target.token.color);
+    filled.setScale(new Vec3(0.25, 0.25, 1));
+    tween(filled).to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
+
+    tween(target.node)
+      .to(0.13, { scale: new Vec3(1.16, 1.16, 1) }, { easing: 'quadOut' })
+      .to(0.24, { scale: Vec3.ONE }, { easing: 'backOut' })
+      .start();
+
+    if (presentOneByOne) {
+      const next = items.find((candidate) => !candidate.matched && !candidate.node.active);
+      if (next) {
+        next.node.active = true;
+        next.node.setScale(new Vec3(0.45, 0.45, 1));
+        const opacity = next.node.getComponent(UIOpacity) ?? next.node.addComponent(UIOpacity);
+        opacity.opacity = 255;
+        tween(next.node).delay(0.16).to(0.3, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
       }
-      if (effect === 'swim' || effect === 'roll') {
-        tween(node).delay(delay).to(0.68, {
-          position: origin.clone().add3f(170, (index % 2 === 0 ? 1 : -1) * 24, 0),
-          angle: effect === 'roll' ? 350 : 0,
-        }, { easing: 'quadInOut' }).start();
-        return;
-      }
-      if (effect === 'flutter' || effect === 'sway') {
-        tween(node)
-          .delay(delay)
-          .to(0.18, { angle: -14, position: origin.clone().add3f(0, 22, 0) })
-          .to(0.18, { angle: 14, position: origin.clone().add3f(0, 38, 0) })
-          .to(0.2, { angle: 0, position: origin })
-          .start();
-        return;
-      }
-      tween(node)
-        .delay(delay)
-        .to(0.18, { position: origin.clone().add3f(0, 36, 0), scale: homeScale.clone().multiplyScalar(1.16) }, { easing: 'quadOut' })
-        .to(0.28, { position: origin, scale: homeScale }, { easing: 'backOut' })
-        .start();
-    });
-    const completionClock = items[0]?.node;
-    if (!completionClock) {
-      done();
-      return;
     }
-    tween(completionClock).delay(1.02).call(done).start();
   }
 
   private playHint(items: ColorItem[], targets: ColorTarget[]): void {
-    const item = items.find((candidate) => !candidate.matched);
+    const item = items.find((candidate) => !candidate.matched && candidate.node.active);
     if (!item) return;
     const target = targets.find((candidate) => !candidate.occupied && candidate.matchKey === item.matchKey);
     if (!target) return;
-    this.focusHoveredTarget(target, targets);
     const start = item.node.position.clone();
     const direction = target.position.clone().subtract(start).multiplyScalar(0.22);
     tween(item.node)
       .stop()
-      .to(0.28, { position: start.clone().add(direction), scale: new Vec3(1.08, 1.08, 1) }, { easing: 'quadOut' })
-      .to(0.36, { position: start, scale: Vec3.ONE }, { easing: 'backOut' })
-      .call(() => this.focusHoveredTarget(null, targets))
+      .to(0.28, { position: start.clone().add(direction), scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+      .to(0.34, { position: start, scale: Vec3.ONE }, { easing: 'backOut' })
+      .start();
+    tween(target.node)
+      .stop()
+      .to(0.18, { scale: new Vec3(1.12, 1.12, 1) })
+      .to(0.26, { scale: Vec3.ONE }, { easing: 'backOut' })
       .start();
   }
 
-  private playTargetIdle(node: Node, effect: ColorCompletionEffect, index: number): void {
-    if (effect !== 'float' && effect !== 'swim' && effect !== 'flutter' && effect !== 'sway') {
-      return;
+  private playSceneCompletion(
+    celebration: ColorCelebration,
+    targets: ColorTarget[],
+    done: () => void,
+  ): void {
+    targets.forEach((target, index) => {
+      const origin = target.node.position.clone();
+      if (celebration === 'balloon-fly') {
+        tween(target.node)
+          .delay(index * 0.08)
+          .to(0.85, {
+            position: origin.clone().add3f((index - 2) * 18, 230 + index * 20, 0),
+            angle: index % 2 === 0 ? -12 : 12,
+          }, { easing: 'sineOut' })
+          .start();
+        return;
+      }
+      if (celebration === 'fish-swim' || celebration === 'train-go') {
+        tween(target.node)
+          .delay(index * 0.07)
+          .to(0.88, {
+            position: origin.clone().add3f(celebration === 'train-go' ? 260 : 220, (index % 2 === 0 ? 1 : -1) * 26, 0),
+            angle: celebration === 'fish-swim' ? (index % 2 === 0 ? 5 : -5) : 0,
+          }, { easing: 'quadInOut' })
+          .start();
+        return;
+      }
+      tween(target.node)
+        .delay(index * 0.07)
+        .to(0.18, { position: origin.clone().add3f(0, 42, 0), scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+        .to(0.22, { position: origin, scale: Vec3.ONE }, { easing: 'backOut' })
+        .to(0.15, { angle: -8 })
+        .to(0.15, { angle: 8 })
+        .to(0.12, { angle: 0 })
+        .start();
+    });
+    if (targets[0]) {
+      tween(targets[0].node).delay(1.15).call(done).start();
+    } else {
+      done();
     }
-    const origin = node.position.clone();
-    const offset = 5 + index % 3 * 2;
-    tween(node)
-      .delay(index * 0.08)
-      .repeatForever(
-        tween<Node>()
-          .to(1.05, { position: origin.clone().add3f(0, offset, 0), angle: index % 2 === 0 ? -2 : 2 }, { easing: 'sineInOut' })
-          .to(1.05, { position: origin, angle: 0 }, { easing: 'sineInOut' }),
-      )
-      .start();
   }
 
-  private getTargetPositions(count: number): Point[] {
-    if (count === 3) {
-      return [{ x: -285, y: 96 }, { x: 0, y: 164 }, { x: 285, y: 96 }];
+  private getTargetPositions(kind: ColorSceneKind, count: number): Point[] {
+    if (kind === 'train') {
+      const gap = count === 3 ? 210 : count === 4 ? 170 : 145;
+      return Array.from({ length: count }, (_, index) => ({
+        x: -230 + index * gap,
+        y: -30,
+      }));
     }
-    if (count === 4) {
-      return [
-        { x: -330, y: 95 },
-        { x: -112, y: 165 },
-        { x: 112, y: 165 },
-        { x: 330, y: 95 },
-      ];
+    if (kind === 'fish') {
+      const gap = count === 3 ? 280 : count === 4 ? 205 : 165;
+      return Array.from({ length: count }, (_, index) => ({
+        x: (index - (count - 1) / 2) * gap,
+        y: 50 + (index % 2 === 0 ? 55 : -35),
+      }));
     }
-    return [
-      { x: -370, y: 90 },
-      { x: -188, y: 168 },
-      { x: 0, y: 104 },
-      { x: 188, y: 168 },
-      { x: 370, y: 90 },
-    ];
-  }
-
-  private getItemStarts(count: number): Point[] {
-    const gap = count === 3 ? 210 : count === 4 ? 170 : 142;
+    if (kind === 'orchard') {
+      const gap = count === 3 ? 270 : count === 4 ? 205 : 165;
+      return Array.from({ length: count }, (_, index) => ({
+        x: (index - (count - 1) / 2) * gap,
+        y: 58 + (index % 2 === 0 ? 82 : 5),
+      }));
+    }
+    const gap = count === 3 ? 270 : count === 4 ? 205 : 160;
     return Array.from({ length: count }, (_, index) => ({
       x: (index - (count - 1) / 2) * gap,
-      y: -278 + (index % 2 === 0 ? 4 : -4),
+      y: 48 + (index % 2 === 0 ? 76 : 12),
     }));
+  }
+
+  private getTargetSize(kind: ColorSceneKind, count: number): number {
+    if (kind === 'train') return count >= 5 ? 100 : 118;
+    if (kind === 'fish') return count >= 5 ? 112 : 132;
+    return count >= 5 ? 108 : 126;
+  }
+
+  private getTrayStarts(count: number, oneByOne: boolean): Point[] {
+    if (oneByOne) {
+      return Array.from({ length: count }, () => ({ x: 0, y: -280 }));
+    }
+    const gap = count === 3 ? 205 : count === 4 ? 170 : 142;
+    return Array.from({ length: count }, (_, index) => ({
+      x: (index - (count - 1) / 2) * gap,
+      y: -280 + (index % 2 === 0 ? 4 : -4),
+    }));
+  }
+
+  private playTargetIdle(node: Node, kind: ColorSceneKind, index: number): void {
+    const origin = node.position.clone();
+    if (kind === 'balloon' || kind === 'fish') {
+      tween(node)
+        .delay(index * 0.13)
+        .repeatForever(
+          tween<Node>()
+            .to(0.8, { position: origin.clone().add3f(0, 7, 0), angle: index % 2 === 0 ? -2 : 2 }, { easing: 'sineInOut' })
+            .to(0.8, { position: origin, angle: 0 }, { easing: 'sineInOut' }),
+        )
+        .start();
+    }
+  }
+
+  private createBunny(parent: Node, x: number, y: number, scale: number): void {
+    const bunny = this.createUiNode('ColorMascotBunny', parent, x, y, 170 * scale, 210 * scale);
+    const bodyColor = new Color(250, 247, 237, 255);
+    const leftEar = this.createToyShapeLayer(bunny, 'EarLeft', -34 * scale, 73 * scale, 72 * scale, 'oval', bodyColor);
+    leftEar.angle = 82;
+    const rightEar = this.createToyShapeLayer(bunny, 'EarRight', 34 * scale, 73 * scale, 72 * scale, 'oval', bodyColor);
+    rightEar.angle = 98;
+    this.createCircle(bunny, 0, 12 * scale, 62 * scale, bodyColor);
+    this.createCircle(bunny, 0, -60 * scale, 55 * scale, bodyColor);
+    this.createCuteFace(bunny, 0, 15 * scale, 30 * scale);
+    this.createCircle(bunny, -48 * scale, 2 * scale, 10 * scale, new Color(247, 151, 155, 95));
+    this.createCircle(bunny, 48 * scale, 2 * scale, 10 * scale, new Color(247, 151, 155, 95));
+  }
+
+  private createCoral(parent: Node, x: number, y: number, color: Color): void {
+    const coral = this.createUiNode('Coral', parent, x, y, 120, 160);
+    [-34, 0, 34].forEach((branchX, index) => {
+      const branch = this.createPanel(
+        coral,
+        'CoralBranch',
+        branchX,
+        index === 1 ? 14 : -4,
+        22,
+        index === 1 ? 130 : 94,
+        color,
+        11,
+      );
+      branch.angle = index === 0 ? -18 : index === 2 ? 18 : 0;
+    });
+  }
+
+  private createTrainEngine(parent: Node, x: number, y: number, accent: Color): void {
+    const engine = this.createUiNode('TrainEngine', parent, x, y, 180, 160);
+    this.createPanel(engine, 'EngineBody', 10, 0, 130, 80, accent, 22);
+    this.createPanel(engine, 'EngineCab', 35, 48, 66, 66, new Color(255, 190, 55, 255), 15);
+    this.createPanel(engine, 'EngineChimney', -38, 48, 28, 68, new Color(72, 131, 194, 255), 10);
+    this.createCircle(engine, -32, -52, 24, new Color(66, 68, 73, 255));
+    this.createCircle(engine, 48, -52, 24, new Color(66, 68, 73, 255));
+    this.createCuteFace(engine, 4, 2, 23);
   }
 
   private shuffle<T>(values: T[]): T[] {
