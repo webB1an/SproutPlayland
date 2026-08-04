@@ -125,7 +125,7 @@ export class ColorGamePage extends MatchGamePageBase {
         new Color(255, 255, 250, 190),
       );
       marker.addComponent(UIOpacity).opacity = difficulty === 3 ? 118 : 220;
-      this.playTargetIdle(targetRoot, level.completionEffect, groupIndex);
+      this.playTargetIdle(ghost, level.completionEffect, groupIndex);
 
       return {
         id: `color-target-${groupIndex}`,
