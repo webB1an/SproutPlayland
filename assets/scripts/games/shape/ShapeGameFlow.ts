@@ -9,7 +9,7 @@ export class ShapeGameFlow {
   private selectedLevelIndex = 0;
   private difficulty: MatchDifficulty = 1;
   private readonly progress = new MatchProgressStore(
-    'sprout-playland:shape-stars:v1',
+    'sprout-playland:shape-stars:v3',
     SHAPE_LEVELS.map((level) => level.id),
   );
   private readonly selectPage: ShapeSelectPage;

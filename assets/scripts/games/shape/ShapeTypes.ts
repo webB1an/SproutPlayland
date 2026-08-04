@@ -1,37 +1,41 @@
 import { Color } from 'cc';
-import type { ToyShape } from '../common/MatchTypes';
+import type {
+  MatchDifficulty,
+  MatchLevelBase,
+  ToyShape,
+} from '../common/MatchTypes';
 
-export type ShapeCompletionEffect =
-  | 'dance'
-  | 'launch'
-  | 'sail'
-  | 'flutter'
-  | 'bloom'
-  | 'house'
-  | 'swim'
-  | 'drive'
-  | 'sparkle'
-  | 'party';
+export type ShapeCelebration =
+  | 'rocket-launch'
+  | 'car-drive'
+  | 'house-light'
+  | 'butterfly-fly';
 
-export type ShapeScenePlacement = {
+export type ShapePartConfig = {
+  id: string;
+  shape: ToyShape;
+  color: Color;
+  size: number;
   x: number;
   y: number;
-  scale: number;
   angle?: number;
+  matchKey?: string;
 };
 
-/**
- * 形状主题包由积木清单、摆放位置和完成表现组成。
- * 页面只消费配置，因此新增机器人、城堡等主题无需增加关卡分支。
- */
-export type ShapeLevelConfig = {
-  id: string;
+export type ShapeStageConfig = {
+  partCount: 4 | 6 | 8;
+  hintOpacity: number;
+  snapDistance: number;
+  randomAngle: number;
+};
+
+export type ShapeLevelConfig = MatchLevelBase & {
+  title: string;
+  subtitle: string;
   background: Color;
   accent: Color;
-  shapes: readonly ToyShape[];
-  colors: readonly Color[];
-  placements: readonly ShapeScenePlacement[];
-  thumbnailFrame: string;
-  referenceFrame: string;
-  completionEffect: ShapeCompletionEffect;
+  objectScale: number;
+  parts: readonly ShapePartConfig[];
+  stages: Record<MatchDifficulty, ShapeStageConfig>;
+  celebration: ShapeCelebration;
 };
