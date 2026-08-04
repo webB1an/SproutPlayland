@@ -8,7 +8,12 @@ import {
 } from 'cc';
 import type { VoiceCue } from '../../app/CustomVoiceController';
 import { MatchInteractionController } from './MatchInteractionController';
-import type { MatchCompletionOptions, MatchItemState } from './MatchTypes';
+import type {
+  MatchCompletionOptions,
+  MatchItemState,
+  MatchRule,
+  MatchTargetState,
+} from './MatchTypes';
 import { ToyPageController } from './ToyPageController';
 
 export abstract class MatchGamePageBase extends ToyPageController {
@@ -17,11 +22,14 @@ export abstract class MatchGamePageBase extends ToyPageController {
   protected bindMatchGame(
     root: Node,
     items: MatchItemState[],
+    targets: MatchTargetState[],
     completion: MatchCompletionOptions,
+    canMatch?: MatchRule,
   ): void {
     const interaction = new MatchInteractionController({
       touchToRoot: (event) => this.touchToRoot(event),
       isCompleted: () => this.matchCompleted,
+      canMatch,
       onPickup: (item) => {
         this.gameAudio?.play('pickup');
         completion.onPickup?.(item);
@@ -31,34 +39,53 @@ export abstract class MatchGamePageBase extends ToyPageController {
         void this.customVoice?.play('retry', 3500);
         completion.onWrong?.(item);
       },
-      onMatched: (item) => {
+      onTargetFocus: (item, target) => {
+        completion.onTargetFocus?.(item, target);
+      },
+      onMatched: (item, target) => {
         this.gameAudio?.play('success');
         void this.customVoice?.playRandom(['correct', 'great'], 1600);
-        completion.onMatched?.(item);
+        completion.onMatched?.(item, target);
       },
       onAllMatched: () => this.playMatchCelebration(root, completion),
     });
-    interaction.bind(root, items);
+    interaction.bind(root, items, targets);
   }
 
-  private playMatchCelebration(root: Node, completion: MatchCompletionOptions): void {
+  private playMatchCelebration(
+    root: Node,
+    completion: MatchCompletionOptions,
+  ): void {
     if (this.matchCompleted) {
       return;
     }
     this.matchCompleted = true;
     const stars = completion.complete();
-    this.gameAudio?.play('celebrate');
-    void this.customVoice?.play('complete');
-    this.createCelebrationConfetti(root);
-    tween(root)
-      .delay(1.75)
-      .call(() => {
-        if (root.isValid && this.contentRoot === root) {
-          this.showMatchCompletion(root, stars, completion);
-          void this.customVoice?.play(`star${stars}` as VoiceCue);
-        }
-      })
-      .start();
+    let continued = false;
+    const continueToReward = (): void => {
+      if (continued) {
+        return;
+      }
+      continued = true;
+      this.gameAudio?.play('celebrate');
+      void this.customVoice?.play('complete');
+      this.createCelebrationConfetti(root);
+      tween(root)
+        .delay(1.35)
+        .call(() => {
+          if (root.isValid && this.contentRoot === root) {
+            this.showMatchCompletion(root, stars, completion);
+            void this.customVoice?.play(`star${stars}` as VoiceCue);
+          }
+        })
+        .start();
+    };
+
+    if (completion.beforeCelebrate) {
+      completion.beforeCelebrate(continueToReward);
+      return;
+    }
+    continueToReward();
   }
 
   private showMatchCompletion(
