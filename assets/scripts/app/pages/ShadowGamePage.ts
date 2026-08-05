@@ -23,6 +23,12 @@ import {
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
 
+type ShadowTargetVisual = {
+  node: Node;
+  preview: Node;
+  matched: boolean;
+};
+
 export class ShadowGamePage extends PageController {
   private runId = 0;
   private completed = false;
@@ -56,7 +62,7 @@ export class ShadowGamePage extends PageController {
       310,
       34,
       new Color(79, 79, 101, 255),
-      690,
+      760,
       54,
     );
     createMiniGameDifficultyBadge(
@@ -73,14 +79,23 @@ export class ShadowGamePage extends PageController {
     const itemY = -195;
     const gap = matchCount === 1 ? 0 : matchCount === 2 ? 235 : 220;
     const targetStates: DragMatchTargetState[] = [];
+    const targetVisuals = new Map<Node, ShadowTargetVisual>();
     const itemStates: DragMatchItemState[] = [];
 
     artworks.forEach((artwork, index) => {
       const x = (index - (matchCount - 1) / 2) * gap;
-      const target = this.createTarget(root, artwork, x, targetY, size);
+      const targetVisual = this.createTarget(
+        root,
+        artwork,
+        x,
+        targetY,
+        size,
+        difficulty,
+      );
+      targetVisuals.set(targetVisual.node, targetVisual);
       targetStates.push({
-        node: target,
-        position: target.position.clone(),
+        node: targetVisual.node,
+        position: targetVisual.node.position.clone(),
         matchKey: artwork.id,
         occupied: false,
         snapDistance: size * (
@@ -135,13 +150,21 @@ export class ShadowGamePage extends PageController {
       },
       onTargetFocus: (_item, target) => {
         for (const candidate of targetStates) {
+          const visual = targetVisuals.get(candidate.node);
+          if (visual) {
+            this.applyTargetAppearance(
+              visual,
+              difficulty,
+              candidate === target,
+            );
+          }
           tween(candidate.node)
             .stop()
             .to(
               0.1,
               {
                 scale: candidate === target
-                  ? new Vec3(1.045, 1.045, 1)
+                  ? new Vec3(1.055, 1.055, 1)
                   : Vec3.ONE,
               },
               { easing: 'quadOut' },
@@ -150,11 +173,20 @@ export class ShadowGamePage extends PageController {
         }
       },
       onMatched: (_item, target) => {
+        const visual = targetVisuals.get(target.node);
+        if (visual) {
+          visual.matched = true;
+          this.applyTargetAppearance(visual, difficulty, false);
+        }
         this.gameAudio?.play('success');
         void this.customVoice?.playRandom(['correct', 'great'], 1200);
         tween(target.node)
           .stop()
-          .to(0.12, { scale: new Vec3(1.07, 1.07, 1) }, { easing: 'quadOut' })
+          .to(
+            0.12,
+            { scale: new Vec3(1.08, 1.08, 1) },
+            { easing: 'quadOut' },
+          )
           .to(0.18, { scale: Vec3.ONE }, { easing: 'backOut' })
           .start();
         this.createMatchedSpark(root, target.position, size);
@@ -183,7 +215,8 @@ export class ShadowGamePage extends PageController {
     x: number,
     y: number,
     size: number,
-  ): Node {
+    difficulty: DifficultyStars,
+  ): ShadowTargetVisual {
     const target = this.createUiNode(
       'ShadowTarget',
       parent,
@@ -225,12 +258,15 @@ export class ShadowGamePage extends PageController {
         shadow: false,
         cornerRadius: Math.max(20, size * 0.12),
         borderWidth: 0,
-        tint: new Color(74, 70, 88, 255),
-        opacity: 34,
-        backgroundColor: new Color(222, 217, 233, 255),
+        backgroundColor: new Color(232, 230, 239, 255),
       },
     );
-    setArtworkAppearance(preview, new Color(65, 63, 76, 255), 62);
+    const visual: ShadowTargetVisual = {
+      node: target,
+      preview,
+      matched: false,
+    };
+    this.applyTargetAppearance(visual, difficulty, false);
     this.createCircle(
       target,
       -size * 0.31,
@@ -238,7 +274,40 @@ export class ShadowGamePage extends PageController {
       Math.max(8, size * 0.045),
       new Color(255, 255, 255, 150),
     );
-    return target;
+    return visual;
+  }
+
+  private applyTargetAppearance(
+    visual: ShadowTargetVisual,
+    difficulty: DifficultyStars,
+    focused: boolean,
+  ): void {
+    if (!visual.preview.isValid) {
+      return;
+    }
+    if (visual.matched) {
+      setArtworkAppearance(visual.preview, Color.WHITE, 255);
+      return;
+    }
+
+    if (focused) {
+      const tint = difficulty === 1
+        ? new Color(250, 250, 250, 255)
+        : difficulty === 2
+          ? new Color(238, 240, 243, 255)
+          : new Color(224, 226, 232, 255);
+      const opacity = difficulty === 1 ? 242 : difficulty === 2 ? 230 : 215;
+      setArtworkAppearance(visual.preview, tint, opacity);
+      return;
+    }
+
+    const tint = difficulty === 1
+      ? new Color(230, 231, 233, 255)
+      : difficulty === 2
+        ? new Color(210, 212, 217, 255)
+        : new Color(188, 190, 198, 255);
+    const opacity = difficulty === 1 ? 205 : difficulty === 2 ? 180 : 155;
+    setArtworkAppearance(visual.preview, tint, opacity);
   }
 
   private createDirectionHint(parent: Node, targetY: number, itemY: number): void {
