@@ -4,14 +4,15 @@ import {
   tween,
   Vec3,
 } from 'cc';
+import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
+import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createSeededRandom,
-  getLevelDifficulty,
+  type DifficultyStars,
   getNextLevelIndex,
   getWrappedArtworks,
-  MiniGameCelebration,
   shuffleWithRandom,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
@@ -37,7 +38,7 @@ export class MemoryGamePage extends PageController {
     super(app);
   }
 
-  show(levelIndex: number): void {
+  show(levelIndex: number, difficulty: DifficultyStars = 1): void {
     const runId = ++this.runId;
     this.locked = false;
     this.completed = false;
@@ -49,19 +50,18 @@ export class MemoryGamePage extends PageController {
       this.onExit();
       return;
     }
-    const difficulty = getLevelDifficulty(levelIndex, allArtworks.length);
     const pairCount = difficulty + 1;
     const artworks = getWrappedArtworks(allArtworks, levelIndex, pairCount);
-    const random = createSeededRandom(9059 + levelIndex * 131);
+    const random = createSeededRandom(
+      9059 + levelIndex * 131 + difficulty * 991,
+    );
     const pairedArtworks: PuzzleArtwork[] = [];
     for (const artwork of artworks) {
       pairedArtworks.push(artwork, artwork);
     }
-    const deck = shuffleWithRandom(
-      pairedArtworks,
-      random,
-    );
+    const deck = shuffleWithRandom(pairedArtworks, random);
     const definition = getMiniGameDefinition('memory');
+    const accent = this.toColor(definition.palette.accent);
     const root = this.resetScreen('MemoryGame');
     this.drawFullBackground(root, this.toColor(definition.palette.background));
     this.createCircle(root, -630, -330, 190, new Color(239, 142, 180, 42));
@@ -76,6 +76,14 @@ export class MemoryGamePage extends PageController {
       new Color(102, 71, 88, 255),
       680,
       54,
+    );
+    createMiniGameDifficultyBadge(
+      this.app,
+      root,
+      difficulty,
+      this.visibleWidth / 2 - 110,
+      310,
+      accent,
     );
 
     const layout = this.getLayout(pairCount);
@@ -94,7 +102,7 @@ export class MemoryGamePage extends PageController {
         index,
       );
       this.cards.push(state);
-      this.bindCard(state, levelIndex, activeArtwork, runId);
+      this.bindCard(state, levelIndex, difficulty, activeArtwork, runId);
     });
     this.createPairProgress(root, pairCount);
   }
@@ -146,7 +154,14 @@ export class MemoryGamePage extends PageController {
     height: number,
     index: number,
   ): MemoryCardState {
-    const card = this.createUiNode(`MemoryCard-${index}`, parent, x, y, width, height);
+    const card = this.createUiNode(
+      `MemoryCard-${index}`,
+      parent,
+      x,
+      y,
+      width,
+      height,
+    );
     this.createPanel(
       card,
       'MemoryCardDepth',
@@ -234,6 +249,7 @@ export class MemoryGamePage extends PageController {
   private bindCard(
     state: MemoryCardState,
     levelIndex: number,
+    difficulty: DifficultyStars,
     activeArtwork: PuzzleArtwork,
     runId: number,
   ): void {
@@ -255,7 +271,12 @@ export class MemoryGamePage extends PageController {
         }
         this.selected.push(state);
         if (this.selected.length === 2) {
-          this.evaluatePair(levelIndex, activeArtwork, runId);
+          this.evaluatePair(
+            levelIndex,
+            difficulty,
+            activeArtwork,
+            runId,
+          );
         }
       });
     });
@@ -263,6 +284,7 @@ export class MemoryGamePage extends PageController {
 
   private evaluatePair(
     levelIndex: number,
+    difficulty: DifficultyStars,
     activeArtwork: PuzzleArtwork,
     runId: number,
   ): void {
@@ -280,7 +302,11 @@ export class MemoryGamePage extends PageController {
       [first, second].forEach((cardState, index) => {
         tween(cardState.card)
           .delay(index * 0.08)
-          .to(0.12, { scale: new Vec3(1.07, 1.07, 1) }, { easing: 'quadOut' })
+          .to(
+            0.12,
+            { scale: new Vec3(1.07, 1.07, 1) },
+            { easing: 'quadOut' },
+          )
           .to(0.18, { scale: Vec3.ONE }, { easing: 'backOut' })
           .start();
         this.createMatchStar(cardState.card);
@@ -298,7 +324,11 @@ export class MemoryGamePage extends PageController {
               .delay(0.36)
               .call(() => {
                 if (runId === this.runId) {
-                  this.showCompletion(activeArtwork, levelIndex);
+                  this.showCompletion(
+                    activeArtwork,
+                    levelIndex,
+                    difficulty,
+                  );
                 }
               })
               .start();
@@ -357,19 +387,21 @@ export class MemoryGamePage extends PageController {
   }
 
   private createMatchStar(parent: Node): void {
-    const star = this.createPuzzleStarMark(
-      parent,
-      0,
-      0,
-      52,
-      true,
-    );
+    const star = this.createPuzzleStarMark(parent, 0, 0, 52, true);
     star.setPosition(0, 0, 0);
     star.setScale(new Vec3(0.12, 0.12, 1));
     tween(star)
       .delay(0.08)
-      .to(0.24, { scale: new Vec3(1.18, 1.18, 1) }, { easing: 'backOut' })
-      .to(0.18, { scale: new Vec3(0.72, 0.72, 1) }, { easing: 'quadInOut' })
+      .to(
+        0.24,
+        { scale: new Vec3(1.18, 1.18, 1) },
+        { easing: 'backOut' },
+      )
+      .to(
+        0.18,
+        { scale: new Vec3(0.72, 0.72, 1) },
+        { easing: 'quadInOut' },
+      )
       .start();
   }
 
@@ -385,18 +417,23 @@ export class MemoryGamePage extends PageController {
     }
   }
 
-  private showCompletion(artwork: PuzzleArtwork, levelIndex: number): void {
+  private showCompletion(
+    artwork: PuzzleArtwork,
+    levelIndex: number,
+    difficulty: DifficultyStars,
+  ): void {
     const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
-    const stars = getLevelDifficulty(levelIndex, allArtworks.length);
-    miniGameProgress.award('memory', artwork.id, stars);
+    miniGameProgress.award('memory', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
-    new MiniGameCelebration(this.app).show(this.contentRoot as Node, {
-      title: getMiniGameDefinition('memory').completionText,
-      stars,
-      onReplay: () => this.show(levelIndex),
-      onNext: () => this.show(getNextLevelIndex(levelIndex, allArtworks.length)),
-      onExit: () => this.leave(),
+    new GameCompletionModal(this.app).show(this.contentRoot as Node, {
+      stars: difficulty,
+      onReplay: () => this.show(levelIndex, difficulty),
+      onNext: () => this.show(
+        getNextLevelIndex(levelIndex, allArtworks.length),
+        difficulty,
+      ),
+      onMenu: () => this.leave(),
     });
   }
 
