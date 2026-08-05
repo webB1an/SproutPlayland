@@ -1,5 +1,8 @@
 import {
   Color,
+  EventTouch,
+  Graphics,
+  Mask,
   Node,
   tween,
   Vec3,
@@ -14,92 +17,318 @@ import {
 import { PageController } from '../PageController';
 import { ArtworkGameSelectPage } from './ArtworkGameSelectPage';
 
+let savedHomeScrollOffset = 0;
+
 export class HomePage extends PageController {
+  private railDragging = false;
+
   show(): void {
     const root = this.resetScreen('Home');
     this.drawFullBackground(root, new Color(242, 236, 218, 255));
-    this.createCircle(root, -635, 320, 170, new Color(224, 239, 198, 112));
-    this.createCircle(root, 635, -338, 190, new Color(255, 220, 162, 78));
-    this.createCircle(root, 360, 350, 82, new Color(205, 235, 224, 72));
-    this.createHeader(root);
-    this.createGameShelf(root);
+    this.createCircle(root, -615, 300, 160, new Color(224, 239, 198, 105));
+    this.createCircle(root, 610, -330, 190, new Color(255, 220, 162, 72));
+    this.createCircle(root, 42, 350, 78, new Color(205, 235, 224, 70));
+
+    this.createHomeIsland(root);
+    this.createGameRail(root);
     this.createVoiceSettingsButton(root);
   }
 
-  private createHeader(parent: Node): void {
-    const mark = this.createUiNode('HomeBrand', parent, -496, 292, 220, 112);
+  private createHomeIsland(parent: Node): void {
+    this.createCircle(parent, -430, 0, 235, new Color(232, 241, 205, 135));
+    this.createCircle(parent, -430, -6, 188, new Color(255, 246, 211, 135));
     if (this.frames.has('home-island')) {
-      const island = this.createImage(mark, 'home-island', -56, -1, 118, 118);
+      const islandShadow = this.createPanel(
+        parent,
+        'HomeIslandShadow',
+        -430,
+        -126,
+        310,
+        58,
+        new Color(84, 105, 66, 32),
+        29,
+      );
+      const island = this.createImage(parent, 'home-island', -430, 8, 470, 470);
+      this.makeHomeIslandInteractive(island, islandShadow);
+      return;
+    }
+    this.createSproutMark(parent, -430, 16, 1.7);
+  }
+
+  private makeHomeIslandInteractive(island: Node, shadow: Node): void {
+    const islandRest = island.position.clone();
+    const shadowRest = shadow.position.clone();
+    let dragging = false;
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    const startIdleMotion = (): void => {
+      if (!island.isValid || !shadow.isValid || dragging) {
+        return;
+      }
       tween(island)
+        .stop()
         .repeatForever(
           tween<Node>()
             .to(
-              2.2,
+              2.4,
               {
-                position: new Vec3(-56, 4, 0),
-                eulerAngles: new Vec3(0.5, -0.8, 0.4),
+                position: new Vec3(islandRest.x, islandRest.y + 4, islandRest.z),
+                scale: new Vec3(1.006, 1.006, 1),
+                eulerAngles: new Vec3(0.7, -1, 0.25),
               },
               { easing: 'sineInOut' },
             )
             .to(
-              2.2,
+              2.4,
               {
-                position: new Vec3(-56, -3, 0),
-                eulerAngles: new Vec3(-0.4, 0.7, -0.3),
+                position: new Vec3(islandRest.x, islandRest.y - 2, islandRest.z),
+                scale: new Vec3(0.998, 0.998, 1),
+                eulerAngles: new Vec3(-0.45, 0.8, -0.2),
               },
               { easing: 'sineInOut' },
             ),
         )
         .start();
-    } else {
-      this.createSproutMark(mark, -56, 0, 0.68);
-    }
-    this.createLabel(
-      mark,
-      '小芽智趣岛',
-      56,
-      12,
-      36,
-      new Color(63, 91, 64, 255),
-      250,
-      55,
+      tween(shadow)
+        .stop()
+        .repeatForever(
+          tween<Node>()
+            .to(
+              2.4,
+              {
+                position: new Vec3(shadowRest.x, shadowRest.y - 2, shadowRest.z),
+                scale: new Vec3(0.96, 0.92, 1),
+              },
+              { easing: 'sineInOut' },
+            )
+            .to(
+              2.4,
+              {
+                position: new Vec3(shadowRest.x, shadowRest.y + 1, shadowRest.z),
+                scale: new Vec3(1.02, 1, 1),
+              },
+              { easing: 'sineInOut' },
+            ),
+        )
+        .start();
+    };
+
+    island.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
+      const location = event.getUILocation();
+      dragging = true;
+      this.gameAudio?.play('pickup');
+      touchStartX = location.x;
+      touchStartY = location.y;
+      tween(island).stop();
+      tween(shadow).stop();
+      island.setPosition(islandRest);
+      island.setScale(new Vec3(1.024, 1.024, 1));
+      island.eulerAngles = Vec3.ZERO;
+      shadow.setPosition(shadowRest);
+      shadow.setScale(new Vec3(1.05, 0.9, 1));
+    });
+
+    island.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
+      if (!dragging) {
+        return;
+      }
+      const location = event.getUILocation();
+      const deltaX = location.x - touchStartX;
+      const deltaY = location.y - touchStartY;
+      const offsetX = this.clamp(deltaX * 0.035, -11, 11);
+      const offsetY = this.clamp(deltaY * 0.028, -8, 8);
+      const tiltX = this.clamp(-deltaY * 0.035, -5, 5);
+      const tiltY = this.clamp(deltaX * 0.04, -7, 7);
+      const tiltZ = this.clamp(-deltaX * 0.007, -1.2, 1.2);
+
+      island.setPosition(
+        islandRest.x + offsetX,
+        islandRest.y + offsetY,
+        islandRest.z,
+      );
+      island.eulerAngles = new Vec3(tiltX, tiltY, tiltZ);
+      shadow.setPosition(
+        shadowRest.x - offsetX * 0.35,
+        shadowRest.y - offsetY * 0.2,
+        shadowRest.z,
+      );
+      shadow.setScale(new Vec3(
+        1.04 + Math.abs(tiltY) * 0.006,
+        0.9 - Math.abs(tiltX) * 0.008,
+        1,
+      ));
+    });
+
+    const releaseIsland = (): void => {
+      if (!dragging) {
+        return;
+      }
+      dragging = false;
+      this.gameAudio?.play('drop');
+      tween(island)
+        .stop()
+        .to(
+          0.52,
+          {
+            position: islandRest,
+            scale: Vec3.ONE,
+            eulerAngles: Vec3.ZERO,
+          },
+          { easing: 'backOut' },
+        )
+        .call(startIdleMotion)
+        .start();
+      tween(shadow)
+        .stop()
+        .to(
+          0.4,
+          {
+            position: shadowRest,
+            scale: Vec3.ONE,
+          },
+          { easing: 'quadOut' },
+        )
+        .start();
+    };
+
+    island.on(Node.EventType.TOUCH_END, releaseIsland);
+    island.on(Node.EventType.TOUCH_CANCEL, releaseIsland);
+    startIdleMotion();
+  }
+
+  private createGameRail(parent: Node): void {
+    const cardWidth = 230;
+    const cardHeight = 420;
+    const cardStep = 260;
+    const sidePadding = 12;
+    const viewportWidth = Math.max(
+      620,
+      Math.min(980, this.visibleWidth - 540),
     );
+    const viewportHeight = 520;
+    const viewportX = this.visibleWidth / 2 - 22 - viewportWidth / 2;
+    const contentWidth = cardWidth + (GAME_CARDS.length - 1) * cardStep;
+    const minOffset = Math.min(
+      0,
+      viewportWidth - contentWidth - sidePadding * 2,
+    );
+    savedHomeScrollOffset = this.clamp(savedHomeScrollOffset, minOffset, 0);
+
     this.createLabel(
-      mark,
-      '点一个喜欢的游戏开始吧',
-      64,
-      -30,
-      19,
-      new Color(111, 128, 96, 255),
-      280,
-      36,
+      parent,
+      '左右滑动选择游戏',
+      viewportX,
+      302,
+      21,
+      new Color(111, 128, 96, 220),
+      viewportWidth,
+      38,
+    );
+
+    const viewport = this.createUiNode(
+      'HomeGameViewport',
+      parent,
+      viewportX,
+      -4,
+      viewportWidth,
+      viewportHeight,
+    );
+    const mask = viewport.addComponent(Mask);
+    mask.type = Mask.Type.GRAPHICS_STENCIL;
+    const maskGraphics = mask.subComp as Graphics;
+    maskGraphics.clear();
+    maskGraphics.fillColor = Color.WHITE;
+    maskGraphics.rect(
+      -viewportWidth / 2,
+      -viewportHeight / 2,
+      viewportWidth,
+      viewportHeight,
+    );
+    maskGraphics.fill();
+
+    const contentBaseX = -viewportWidth / 2 + sidePadding + cardWidth / 2;
+    const content = this.createUiNode(
+      'HomeGameRail',
+      viewport,
+      contentBaseX + savedHomeScrollOffset,
+      0,
+      contentWidth,
+      viewportHeight,
+    );
+
+    GAME_CARDS.forEach((definition, index) => {
+      this.createGameCard(
+        content,
+        definition,
+        index * cardStep,
+        0,
+        cardWidth,
+        cardHeight,
+      );
+    });
+
+    this.makeGameRailDraggable(
+      viewport,
+      content,
+      contentBaseX,
+      minOffset,
+      cardStep,
     );
   }
 
-  private createGameShelf(parent: Node): void {
-    const cardWidth = 210;
-    const gap = 30;
-    const totalWidth = GAME_CARDS.length * cardWidth + (GAME_CARDS.length - 1) * gap;
-    const startX = -totalWidth / 2 + cardWidth / 2;
-    this.createPanel(
-      parent,
-      'ShelfDepth',
-      0,
-      -250,
-      totalWidth + 70,
-      38,
-      new Color(126, 97, 67, 30),
-      19,
-    );
-    GAME_CARDS.forEach((definition, index) => {
-      this.createGameCard(
-        parent,
-        definition,
-        startX + index * (cardWidth + gap),
-        -28,
-        cardWidth,
-      );
+  private makeGameRailDraggable(
+    viewport: Node,
+    content: Node,
+    contentBaseX: number,
+    minOffset: number,
+    cardStep: number,
+  ): void {
+    let touchStartX = 0;
+    let startOffset = savedHomeScrollOffset;
+
+    viewport.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
+      tween(content).stop();
+      touchStartX = this.touchToRoot(event).x;
+      startOffset = savedHomeScrollOffset;
+      this.railDragging = false;
     });
+
+    viewport.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
+      const deltaX = this.touchToRoot(event).x - touchStartX;
+      if (Math.abs(deltaX) > 10) {
+        this.railDragging = true;
+      }
+      if (!this.railDragging) {
+        return;
+      }
+      savedHomeScrollOffset = this.clamp(startOffset + deltaX, minOffset, 0);
+      content.setPosition(contentBaseX + savedHomeScrollOffset, 0, 0);
+    });
+
+    const finish = (): void => {
+      if (this.railDragging) {
+        const target = this.clamp(
+          Math.round(savedHomeScrollOffset / cardStep) * cardStep,
+          minOffset,
+          0,
+        );
+        savedHomeScrollOffset = target;
+        tween(content)
+          .to(
+            0.22,
+            { position: new Vec3(contentBaseX + target, 0, 0) },
+            { easing: 'quadOut' },
+          )
+          .start();
+      }
+      this.scheduleOnce(() => {
+        this.railDragging = false;
+      }, 0);
+    };
+
+    viewport.on(Node.EventType.TOUCH_END, finish);
+    viewport.on(Node.EventType.TOUCH_CANCEL, finish);
   }
 
   private createGameCard(
@@ -108,8 +337,8 @@ export class HomePage extends PageController {
     x: number,
     y: number,
     width: number,
+    height: number,
   ): void {
-    const height = 392;
     const cardColor = this.toColor(definition.palette.card);
     const depthColor = this.toColor(definition.palette.depth);
     const accentColor = this.toColor(definition.palette.accent);
@@ -121,7 +350,7 @@ export class HomePage extends PageController {
       width,
       height,
       new Color(depthColor.r, depthColor.g, depthColor.b, 84),
-      42,
+      44,
     );
     const card = this.createPanel(
       parent,
@@ -131,44 +360,72 @@ export class HomePage extends PageController {
       width,
       height,
       cardColor,
-      42,
+      44,
       new Color(255, 255, 244, 215),
       4,
     );
-    this.createCircle(card, 0, 70, 82, new Color(255, 255, 244, 175));
+    this.createCircle(card, 0, 58, 94, new Color(255, 255, 244, 175));
     this.createGameIcon(card, definition.id, accentColor);
     this.createLabel(
       card,
       definition.title,
       0,
-      -74,
-      27,
+      -78,
+      28,
       new Color(63, 79, 66, 255),
       width - 24,
-      42,
+      44,
     );
     this.createLabel(
       card,
       definition.subtitle,
       0,
-      -112,
+      -116,
       17,
       new Color(96, 111, 91, 255),
       width - 20,
       34,
     );
-    this.createCircle(card, 0, -158, 29, new Color(depthColor.r, depthColor.g, depthColor.b, 255));
+    this.createCircle(
+      card,
+      0,
+      -160,
+      31,
+      new Color(depthColor.r, depthColor.g, depthColor.b, 255),
+    );
     this.createLabel(
       card,
       '›',
       1,
-      -154,
-      39,
+      -156,
+      41,
       new Color(255, 255, 244, 255),
-      44,
-      44,
+      46,
+      46,
     );
-    this.makeButton(card, () => this.openGame(definition.id));
+    this.makeRailCardButton(card, () => this.openGame(definition.id));
+  }
+
+  private makeRailCardButton(node: Node, action: () => void): void {
+    node.on(Node.EventType.TOUCH_START, () => {
+      tween(node)
+        .stop()
+        .to(0.07, { scale: new Vec3(0.97, 0.97, 1) })
+        .start();
+    });
+    node.on(Node.EventType.TOUCH_END, () => {
+      const restore = tween(node).stop().to(0.09, { scale: Vec3.ONE });
+      if (!this.railDragging) {
+        restore.call(() => {
+          this.gameAudio?.play('tap');
+          action();
+        });
+      }
+      restore.start();
+    });
+    node.on(Node.EventType.TOUCH_CANCEL, () => {
+      tween(node).stop().to(0.09, { scale: Vec3.ONE }).start();
+    });
   }
 
   private createGameIcon(parent: Node, gameId: GameCardId, accent: Color): void {
@@ -200,12 +457,10 @@ export class HomePage extends PageController {
           parent,
           'PuzzleIconTile',
           (column - 0.5) * (cellSize + gap),
-          70 + (0.5 - row) * (cellSize + gap),
+          58 + (0.5 - row) * (cellSize + gap),
           cellSize,
           cellSize,
-          row === column
-            ? accent
-            : new Color(255, 211, 92, 255),
+          row === column ? accent : new Color(255, 211, 92, 255),
           13,
           new Color(255, 255, 246, 190),
           3,
@@ -220,7 +475,7 @@ export class HomePage extends PageController {
       parent,
       'ScratchPicture',
       0,
-      70,
+      58,
       116,
       112,
       new Color(126, 205, 220, 255),
@@ -228,17 +483,26 @@ export class HomePage extends PageController {
       new Color(255, 255, 246, 220),
       4,
     );
-    this.createSunMark(parent, 14, 82, 0.28);
-    this.createCircle(parent, -35, 58, 26, new Color(111, 176, 98, 255));
-    this.createCircle(parent, -26, 89, 30, new Color(250, 248, 231, 255));
-    this.createCircle(parent, 6, 98, 37, new Color(250, 248, 231, 255));
-    this.createCircle(parent, 42, 84, 28, new Color(250, 248, 231, 255));
-    this.createPanel(parent, 'ScratchCloudBase', 6, 70, 102, 42, new Color(250, 248, 231, 255), 21);
+    this.createSunMark(parent, 14, 70, 0.28);
+    this.createCircle(parent, -35, 46, 26, new Color(111, 176, 98, 255));
+    this.createCircle(parent, -26, 77, 30, new Color(250, 248, 231, 255));
+    this.createCircle(parent, 6, 86, 37, new Color(250, 248, 231, 255));
+    this.createCircle(parent, 42, 72, 28, new Color(250, 248, 231, 255));
+    this.createPanel(
+      parent,
+      'ScratchCloudBase',
+      6,
+      58,
+      102,
+      42,
+      new Color(250, 248, 231, 255),
+      21,
+    );
     const finger = this.createPanel(
       parent,
       'ScratchFinger',
       47,
-      36,
+      24,
       18,
       60,
       accent,
@@ -252,7 +516,7 @@ export class HomePage extends PageController {
       parent,
       'ShadowSlot',
       -24,
-      82,
+      70,
       84,
       106,
       new Color(86, 80, 99, 128),
@@ -263,7 +527,7 @@ export class HomePage extends PageController {
       parent,
       'ShadowPiece',
       30,
-      60,
+      48,
       84,
       106,
       accent,
@@ -278,9 +542,9 @@ export class HomePage extends PageController {
 
   private createBubbleIcon(parent: Node, accent: Color): void {
     const bubbles = [
-      { x: -37, y: 58, radius: 38 },
-      { x: 24, y: 88, radius: 49 },
-      { x: 45, y: 40, radius: 26 },
+      { x: -37, y: 46, radius: 38 },
+      { x: 24, y: 76, radius: 49 },
+      { x: 45, y: 28, radius: 26 },
     ];
     bubbles.forEach((bubble, index) => {
       this.createCircle(
@@ -312,7 +576,7 @@ export class HomePage extends PageController {
       parent,
       'MemoryBackCard',
       -29,
-      78,
+      66,
       86,
       118,
       new Color(133, 111, 175, 255),
@@ -325,7 +589,7 @@ export class HomePage extends PageController {
       parent,
       'MemoryFrontCard',
       29,
-      60,
+      48,
       86,
       118,
       accent,
