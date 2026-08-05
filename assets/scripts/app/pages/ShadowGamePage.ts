@@ -4,20 +4,21 @@ import {
   tween,
   Vec3,
 } from 'cc';
+import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
+import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createArtworkTile,
+  createSeededRandom,
+  type DifficultyStars,
   DragMatchController,
   type DragMatchItemState,
   type DragMatchTargetState,
-  getLevelDifficulty,
   getNextLevelIndex,
   getWrappedArtworks,
-  MiniGameCelebration,
   setArtworkAppearance,
   shuffleWithRandom,
-  createSeededRandom,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
@@ -30,7 +31,7 @@ export class ShadowGamePage extends PageController {
     super(app);
   }
 
-  show(levelIndex: number): void {
+  show(levelIndex: number, difficulty: DifficultyStars = 1): void {
     const runId = ++this.runId;
     this.completed = false;
     const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
@@ -39,10 +40,10 @@ export class ShadowGamePage extends PageController {
       this.onExit();
       return;
     }
-    const difficulty = getLevelDifficulty(levelIndex, allArtworks.length);
     const matchCount = difficulty;
     const artworks = getWrappedArtworks(allArtworks, levelIndex, matchCount);
     const definition = getMiniGameDefinition('shadow');
+    const accent = this.toColor(definition.palette.accent);
     const root = this.resetScreen('ShadowGame');
     this.drawFullBackground(root, this.toColor(definition.palette.background));
     this.createCircle(root, -635, -320, 185, new Color(179, 151, 231, 52));
@@ -57,6 +58,14 @@ export class ShadowGamePage extends PageController {
       new Color(79, 79, 101, 255),
       690,
       54,
+    );
+    createMiniGameDifficultyBadge(
+      this.app,
+      root,
+      difficulty,
+      this.visibleWidth / 2 - 110,
+      310,
+      accent,
     );
 
     const size = matchCount === 1 ? 238 : matchCount === 2 ? 216 : 186;
@@ -74,15 +83,21 @@ export class ShadowGamePage extends PageController {
         position: target.position.clone(),
         matchKey: artwork.id,
         occupied: false,
-        snapDistance: size * 0.7,
+        snapDistance: size * (
+          difficulty === 1 ? 0.82 : difficulty === 2 ? 0.72 : 0.64
+        ),
       });
     });
 
-    const random = createSeededRandom(773 + levelIndex * 53);
+    const random = createSeededRandom(
+      773 + levelIndex * 53 + difficulty * 887,
+    );
     const shuffled = shuffleWithRandom(artworks, random);
     shuffled.forEach((artwork, index) => {
       const x = (index - (matchCount - 1) / 2) * gap;
-      const angle = (random() - 0.5) * 7;
+      const angle = difficulty === 1
+        ? 0
+        : (random() - 0.5) * (difficulty === 2 ? 6 : 10);
       const item = createArtworkTile(
         this.app,
         root,
@@ -124,7 +139,11 @@ export class ShadowGamePage extends PageController {
             .stop()
             .to(
               0.1,
-              { scale: candidate === target ? new Vec3(1.045, 1.045, 1) : Vec3.ONE },
+              {
+                scale: candidate === target
+                  ? new Vec3(1.045, 1.045, 1)
+                  : Vec3.ONE,
+              },
               { easing: 'quadOut' },
             )
             .start();
@@ -149,7 +168,7 @@ export class ShadowGamePage extends PageController {
           .delay(0.42)
           .call(() => {
             if (runId === this.runId && root.isValid) {
-              this.showCompletion(activeArtwork, levelIndex);
+              this.showCompletion(activeArtwork, levelIndex, difficulty);
             }
           })
           .start();
@@ -165,7 +184,14 @@ export class ShadowGamePage extends PageController {
     y: number,
     size: number,
   ): Node {
-    const target = this.createUiNode('ShadowTarget', parent, x, y, size + 22, size + 22);
+    const target = this.createUiNode(
+      'ShadowTarget',
+      parent,
+      x,
+      y,
+      size + 22,
+      size + 22,
+    );
     this.createPanel(
       target,
       'TargetDepth',
@@ -217,7 +243,14 @@ export class ShadowGamePage extends PageController {
 
   private createDirectionHint(parent: Node, targetY: number, itemY: number): void {
     const centerY = (targetY + itemY) / 2;
-    const arrow = this.createUiNode('ShadowDirectionHint', parent, 0, centerY, 60, 80);
+    const arrow = this.createUiNode(
+      'ShadowDirectionHint',
+      parent,
+      0,
+      centerY,
+      60,
+      80,
+    );
     this.createPanel(
       arrow,
       'ArrowStem',
@@ -240,8 +273,16 @@ export class ShadowGamePage extends PageController {
     tween(arrow)
       .repeatForever(
         tween<Node>()
-          .to(0.7, { position: new Vec3(0, centerY + 9, 0) }, { easing: 'sineInOut' })
-          .to(0.7, { position: new Vec3(0, centerY - 5, 0) }, { easing: 'sineInOut' }),
+          .to(
+            0.7,
+            { position: new Vec3(0, centerY + 9, 0) },
+            { easing: 'sineInOut' },
+          )
+          .to(
+            0.7,
+            { position: new Vec3(0, centerY - 5, 0) },
+            { easing: 'sineInOut' },
+          ),
       )
       .start();
   }
@@ -283,18 +324,23 @@ export class ShadowGamePage extends PageController {
     }
   }
 
-  private showCompletion(artwork: PuzzleArtwork, levelIndex: number): void {
+  private showCompletion(
+    artwork: PuzzleArtwork,
+    levelIndex: number,
+    difficulty: DifficultyStars,
+  ): void {
     const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
-    const stars = getLevelDifficulty(levelIndex, allArtworks.length);
-    miniGameProgress.award('shadow', artwork.id, stars);
+    miniGameProgress.award('shadow', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
-    new MiniGameCelebration(this.app).show(this.contentRoot as Node, {
-      title: getMiniGameDefinition('shadow').completionText,
-      stars,
-      onReplay: () => this.show(levelIndex),
-      onNext: () => this.show(getNextLevelIndex(levelIndex, allArtworks.length)),
-      onExit: () => this.leave(),
+    new GameCompletionModal(this.app).show(this.contentRoot as Node, {
+      stars: difficulty,
+      onReplay: () => this.show(levelIndex, difficulty),
+      onNext: () => this.show(
+        getNextLevelIndex(levelIndex, allArtworks.length),
+        difficulty,
+      ),
+      onMenu: () => this.leave(),
     });
   }
 
