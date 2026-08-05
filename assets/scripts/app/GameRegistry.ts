@@ -48,8 +48,8 @@ export const GAME_CARDS: readonly GameCardDefinition[] = [
   },
   {
     id: 'shadow',
-    title: '恐龙归位',
-    subtitle: '送回一样的位置',
+    title: '恐龙配对',
+    subtitle: '找到一样的恐龙',
     palette: {
       card: [226, 216, 249],
       depth: [134, 111, 196],
@@ -92,9 +92,9 @@ export const MINI_GAME_DEFINITIONS: Readonly<Record<MiniGameId, MiniGameDefiniti
   shadow: {
     ...GAME_CARDS[2],
     id: 'shadow',
-    selectTitle: '选一组恐龙来归位',
-    instruction: '把图片拖到一样的位置',
-    completionText: '恐龙都回到自己的位置啦！',
+    selectTitle: '选一组恐龙来配对',
+    instruction: '把下面的恐龙放到上面一样的图片里',
+    completionText: '一样的恐龙都配对成功啦！',
   },
   bubble: {
     ...GAME_CARDS[3],
