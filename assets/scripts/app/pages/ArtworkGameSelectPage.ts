@@ -11,21 +11,27 @@ import {
   getMiniGameDefinition,
   type MiniGameId,
 } from '../GameRegistry';
+import {
+  getMiniGameDifficultyOption,
+  MINI_GAME_DIFFICULTIES,
+} from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
-import { getLevelDifficulty } from '../MiniGameShared';
+import type { DifficultyStars } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
-import { ScratchGamePage } from './ScratchGamePage';
-import { ShadowGamePage } from './ShadowGamePage';
 import { BubbleGamePage } from './BubbleGamePage';
 import { MemoryGamePage } from './MemoryGamePage';
+import { ScratchGamePage } from './ScratchGamePage';
+import { ShadowGamePage } from './ShadowGamePage';
 
 const savedScrollOffsets: Partial<Record<MiniGameId, number>> = {};
+const savedDifficulties: Partial<Record<MiniGameId, DifficultyStars>> = {};
 
-/** 新小游戏共用选关页，选关图与实际游戏始终使用同一份拼图素材配置。 */
+/** 新小游戏共用选关页，关卡素材和难度选择都由统一配置驱动。 */
 export class ArtworkGameSelectPage extends PageController {
   private scrollOffset = 0;
   private dragging = false;
+  private selectedDifficulty: DifficultyStars = 1;
 
   showLoading(gameId: MiniGameId): void {
     const definition = getMiniGameDefinition(gameId);
@@ -67,6 +73,7 @@ export class ArtworkGameSelectPage extends PageController {
 
   show(gameId: MiniGameId): void {
     const definition = getMiniGameDefinition(gameId);
+    this.selectedDifficulty = savedDifficulties[gameId] ?? 1;
     const root = this.resetScreen(`${gameId}Select`);
     this.drawFullBackground(root, this.toColor(definition.palette.background));
     this.createDecorations(root, gameId);
@@ -84,15 +91,83 @@ export class ArtworkGameSelectPage extends PageController {
     this.createLabel(
       root,
       definition.selectTitle,
-      240,
-      306,
-      25,
+      -390,
+      257,
+      20,
       new Color(103, 120, 98, 255),
-      560,
-      45,
+      380,
+      38,
     );
+    this.createDifficultySelector(root, gameId);
     this.scrollOffset = savedScrollOffsets[gameId] ?? 0;
     this.createArtworkRail(root, gameId);
+  }
+
+  private createDifficultySelector(parent: Node, gameId: MiniGameId): void {
+    const definition = getMiniGameDefinition(gameId);
+    const accent = this.toColor(definition.palette.accent);
+    const cardColor = this.toColor(definition.palette.card);
+    const startX = 100;
+    const step = 175;
+    const y = 302;
+
+    MINI_GAME_DIFFICULTIES.forEach((option, index) => {
+      const selected = option.value === this.selectedDifficulty;
+      const x = startX + index * step;
+      this.createPanel(
+        parent,
+        'DifficultyButtonDepth',
+        x + 2,
+        y - 5,
+        150,
+        64,
+        new Color(accent.r, accent.g, accent.b, selected ? 90 : 34),
+        25,
+      );
+      const button = this.createPanel(
+        parent,
+        `Difficulty${option.value}`,
+        x,
+        y,
+        150,
+        64,
+        selected ? cardColor : new Color(255, 255, 248, 224),
+        25,
+        selected
+          ? new Color(accent.r, accent.g, accent.b, 235)
+          : new Color(accent.r, accent.g, accent.b, 92),
+        selected ? 4 : 3,
+      );
+      this.createLabel(
+        button,
+        option.label,
+        -22,
+        1,
+        22,
+        new Color(66, 83, 71, 255),
+        76,
+        38,
+      );
+      for (let starIndex = 0; starIndex < 3; starIndex++) {
+        this.createCircle(
+          button,
+          28 + starIndex * 16,
+          0,
+          5,
+          starIndex < option.value
+            ? accent
+            : new Color(accent.r, accent.g, accent.b, 48),
+        );
+      }
+      this.makeButton(button, () => {
+        if (this.selectedDifficulty === option.value) {
+          return;
+        }
+        savedDifficulties[gameId] = option.value;
+        this.selectedDifficulty = option.value;
+        this.show(gameId);
+      });
+    });
   }
 
   private createDecorations(parent: Node, gameId: MiniGameId): void {
@@ -130,11 +205,11 @@ export class ArtworkGameSelectPage extends PageController {
     }
     const cardWidth = 220;
     const columnStep = 246;
-    const rowStep = 282;
+    const rowStep = 272;
     const columns = Math.ceil(artworks.length / 2);
     const contentWidth = cardWidth + (columns - 1) * columnStep;
     const viewportWidth = Math.max(720, this.visibleWidth - 140);
-    const viewportHeight = 600;
+    const viewportHeight = 555;
     const sidePadding = 18;
     const minOffset = Math.min(
       0,
@@ -146,7 +221,7 @@ export class ArtworkGameSelectPage extends PageController {
       'ArtworkGameViewport',
       parent,
       0,
-      -28,
+      -50,
       viewportWidth,
       viewportHeight,
     );
@@ -172,7 +247,7 @@ export class ArtworkGameSelectPage extends PageController {
       contentWidth,
       viewportHeight,
     );
-    const topRowY = 122;
+    const topRowY = 115;
     artworks.forEach((artwork, index) => {
       const column = index % columns;
       const row = index < columns ? 0 : 1;
@@ -205,8 +280,8 @@ export class ArtworkGameSelectPage extends PageController {
   ): void {
     const definition = getMiniGameDefinition(gameId);
     const cardWidth = 220;
-    const cardHeight = 260;
-    const imageSize = 188;
+    const cardHeight = 252;
+    const imageSize = 182;
     const imageY = 20;
 
     this.createPanel(
@@ -268,14 +343,37 @@ export class ArtworkGameSelectPage extends PageController {
         16,
       );
     }
-    this.createModeMark(card, gameId, 68, 82);
+    this.createDifficultyMark(card, this.selectedDifficulty, -68, 80);
+    this.createModeMark(card, gameId, 68, 80);
     const earnedStars = miniGameProgress.getStars(gameId, artwork.id);
-    this.createStarRow(card, earnedStars, 0, -104, 30, 42);
-    if (earnedStars === 0) {
-      const difficulty = getLevelDifficulty(index, this.puzzleArtworks.length);
-      this.createDifficultyDots(card, difficulty, 0, -104);
-    }
+    this.createStarRow(card, earnedStars, 0, -100, 30, 42);
     this.makeCardButton(card, () => this.launch(gameId, index));
+  }
+
+  private createDifficultyMark(
+    parent: Node,
+    difficulty: DifficultyStars,
+    x: number,
+    y: number,
+  ): void {
+    const definition = getMiniGameDifficultyOption(difficulty);
+    const badge = this.createCircle(
+      parent,
+      x,
+      y,
+      28,
+      new Color(255, 255, 248, 235),
+    );
+    this.createLabel(
+      badge,
+      definition.shortLabel,
+      0,
+      1,
+      22,
+      new Color(83, 100, 86, 255),
+      38,
+      34,
+    );
   }
 
   private createModeMark(
@@ -301,36 +399,49 @@ export class ArtworkGameSelectPage extends PageController {
       return;
     }
     if (gameId === 'shadow') {
-      this.createPanel(badge, 'ShadowBack', -6, 4, 24, 28, new Color(87, 83, 103, 150), 7);
+      this.createPanel(
+        badge,
+        'ShadowBack',
+        -6,
+        4,
+        24,
+        28,
+        new Color(87, 83, 103, 150),
+        7,
+      );
       this.createPanel(badge, 'ShadowFront', 7, -5, 24, 28, accent, 7);
       return;
     }
     if (gameId === 'bubble') {
       this.createCircle(badge, -9, -5, 8, accent);
-      this.createCircle(badge, 8, 7, 11, new Color(accent.r, accent.g, accent.b, 210));
-      this.createCircle(badge, 13, -11, 6, new Color(accent.r, accent.g, accent.b, 170));
+      this.createCircle(
+        badge,
+        8,
+        7,
+        11,
+        new Color(accent.r, accent.g, accent.b, 210),
+      );
+      this.createCircle(
+        badge,
+        13,
+        -11,
+        6,
+        new Color(accent.r, accent.g, accent.b, 170),
+      );
       return;
     }
-    this.createPanel(badge, 'MemoryBack', -7, 4, 22, 28, new Color(108, 98, 139, 175), 6);
+    this.createPanel(
+      badge,
+      'MemoryBack',
+      -7,
+      4,
+      22,
+      28,
+      new Color(108, 98, 139, 175),
+      6,
+    );
     this.createPanel(badge, 'MemoryFront', 7, -5, 22, 28, accent, 6);
     this.createCircle(badge, 8, -4, 4, new Color(255, 247, 211, 255));
-  }
-
-  private createDifficultyDots(
-    parent: Node,
-    difficulty: 1 | 2 | 3,
-    x: number,
-    y: number,
-  ): void {
-    for (let index = 0; index < difficulty; index++) {
-      this.createCircle(
-        parent,
-        x + (index - (difficulty - 1) / 2) * 24,
-        y,
-        7,
-        new Color(141, 174, 151, 220),
-      );
-    }
   }
 
   private makeRailDraggable(
@@ -388,13 +499,18 @@ export class ArtworkGameSelectPage extends PageController {
 
   private makeCardButton(node: Node, action: () => void): void {
     node.on(Node.EventType.TOUCH_START, () => {
-      tween(node).stop().to(0.07, { scale: new Vec3(0.97, 0.97, 1) }).start();
+      tween(node)
+        .stop()
+        .to(0.07, { scale: new Vec3(0.97, 0.97, 1) })
+        .start();
     });
     node.on(Node.EventType.TOUCH_END, () => {
       const restore = tween(node).stop().to(0.09, { scale: Vec3.ONE });
       if (!this.dragging) {
-        this.gameAudio?.play('tap');
-        restore.call(action);
+        restore.call(() => {
+          this.gameAudio?.play('tap');
+          action();
+        });
       }
       restore.start();
     });
@@ -411,9 +527,6 @@ export class ArtworkGameSelectPage extends PageController {
     size: number,
     gap: number,
   ): void {
-    if (earnedStars <= 0) {
-      return;
-    }
     for (let index = 0; index < 3; index++) {
       this.createPuzzleStarMark(
         parent,
@@ -426,6 +539,8 @@ export class ArtworkGameSelectPage extends PageController {
   }
 
   private launch(gameId: MiniGameId, levelIndex: number): void {
+    const difficulty = this.selectedDifficulty;
+    savedDifficulties[gameId] = difficulty;
     this.navigationSequence++;
     this.customVoice?.stopPlayback();
     const returnToSelect = (): void => {
@@ -434,18 +549,18 @@ export class ArtworkGameSelectPage extends PageController {
       new ArtworkGameSelectPage(this.app).show(gameId);
     };
     if (gameId === 'scratch') {
-      new ScratchGamePage(this.app, returnToSelect).show(levelIndex);
+      new ScratchGamePage(this.app, returnToSelect).show(levelIndex, difficulty);
       return;
     }
     if (gameId === 'shadow') {
-      new ShadowGamePage(this.app, returnToSelect).show(levelIndex);
+      new ShadowGamePage(this.app, returnToSelect).show(levelIndex, difficulty);
       return;
     }
     if (gameId === 'bubble') {
-      new BubbleGamePage(this.app, returnToSelect).show(levelIndex);
+      new BubbleGamePage(this.app, returnToSelect).show(levelIndex, difficulty);
       return;
     }
-    new MemoryGamePage(this.app, returnToSelect).show(levelIndex);
+    new MemoryGamePage(this.app, returnToSelect).show(levelIndex, difficulty);
   }
 
   private toColor(rgb: readonly [number, number, number]): Color {
