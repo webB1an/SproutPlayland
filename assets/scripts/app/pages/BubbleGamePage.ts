@@ -5,14 +5,15 @@ import {
   UIOpacity,
   Vec3,
 } from 'cc';
+import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
+import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createSeededRandom,
-  getLevelDifficulty,
+  type DifficultyStars,
   getNextLevelIndex,
   getWrappedArtworks,
-  MiniGameCelebration,
   shuffleWithRandom,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
@@ -31,7 +32,7 @@ export class BubbleGamePage extends PageController {
     super(app);
   }
 
-  show(levelIndex: number): void {
+  show(levelIndex: number, difficulty: DifficultyStars = 1): void {
     const runId = ++this.runId;
     this.stageIndex = 0;
     this.stageSequence = 0;
@@ -43,8 +44,10 @@ export class BubbleGamePage extends PageController {
       return;
     }
     this.activeArtwork = artwork;
-    this.targetSequence = getWrappedArtworks(artworks, levelIndex, 3);
+    const targetCount = difficulty === 1 ? 2 : 3;
+    this.targetSequence = getWrappedArtworks(artworks, levelIndex, targetCount);
     const definition = getMiniGameDefinition('bubble');
+    const accent = this.toColor(definition.palette.accent);
     const root = this.resetScreen('BubbleGame');
     this.drawFullBackground(root, this.toColor(definition.palette.background));
     this.createCircle(root, -640, -335, 200, new Color(119, 207, 231, 48));
@@ -60,10 +63,23 @@ export class BubbleGamePage extends PageController {
       720,
       54,
     );
-    this.renderStage(root, levelIndex, runId);
+    createMiniGameDifficultyBadge(
+      this.app,
+      root,
+      difficulty,
+      this.visibleWidth / 2 - 110,
+      310,
+      accent,
+    );
+    this.renderStage(root, levelIndex, difficulty, runId);
   }
 
-  private renderStage(root: Node, levelIndex: number, runId: number): void {
+  private renderStage(
+    root: Node,
+    levelIndex: number,
+    difficulty: DifficultyStars,
+    runId: number,
+  ): void {
     if (runId !== this.runId || !root.isValid) {
       return;
     }
@@ -75,13 +91,17 @@ export class BubbleGamePage extends PageController {
     const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
     const target = this.targetSequence[this.stageIndex];
     if (!target) {
-      this.finishLevel(levelIndex);
+      this.finishLevel(levelIndex, difficulty);
       return;
     }
-    const difficulty = getLevelDifficulty(levelIndex, allArtworks.length);
     const bubbleCount = 3 + difficulty;
-    const targetIndex = Math.max(0, allArtworks.findIndex((item) => item.id === target.id));
-    const random = createSeededRandom(1201 + levelIndex * 83 + this.stageIndex * 419);
+    const targetIndex = Math.max(
+      0,
+      allArtworks.findIndex((item) => item.id === target.id),
+    );
+    const random = createSeededRandom(
+      1201 + levelIndex * 83 + this.stageIndex * 419 + difficulty * 977,
+    );
     const candidates = shuffleWithRandom(
       getWrappedArtworks(allArtworks, targetIndex, bubbleCount),
       random,
@@ -118,6 +138,7 @@ export class BubbleGamePage extends PageController {
         position,
         index,
         levelIndex,
+        difficulty,
         runId,
         stageSequence,
       );
@@ -180,11 +201,12 @@ export class BubbleGamePage extends PageController {
   }
 
   private createStageDots(parent: Node): void {
-    for (let index = 0; index < 3; index++) {
+    const count = this.targetSequence.length;
+    for (let index = 0; index < count; index++) {
       const active = index <= this.stageIndex;
       this.createCircle(
         parent,
-        -430 + (index - 1) * 40,
+        -430 + (index - (count - 1) / 2) * 40,
         -244,
         active ? 10 : 8,
         active
@@ -207,7 +229,13 @@ export class BubbleGamePage extends PageController {
       return [positions[0], positions[1], positions[3], positions[4]];
     }
     if (count === 5) {
-      return [positions[0], positions[1], positions[2], positions[3], positions[4]];
+      return [
+        positions[0],
+        positions[1],
+        positions[2],
+        positions[3],
+        positions[4],
+      ];
     }
     return positions.slice(0, count);
   }
@@ -220,7 +248,14 @@ export class BubbleGamePage extends PageController {
     size: number,
     index: number,
   ): Node {
-    const bubble = this.createUiNode(`Bubble-${artwork.id}`, parent, x, y, size, size);
+    const bubble = this.createUiNode(
+      `Bubble-${artwork.id}`,
+      parent,
+      x,
+      y,
+      size,
+      size,
+    );
     this.createCircle(
       bubble,
       5,
@@ -270,16 +305,25 @@ export class BubbleGamePage extends PageController {
     rest: { x: number; y: number },
     index: number,
     levelIndex: number,
+    difficulty: DifficultyStars,
     runId: number,
     stageSequence: number,
   ): void {
     bubble.on(Node.EventType.TOUCH_START, () => {
-      if (this.stageLocked || runId !== this.runId || stageSequence !== this.stageSequence) {
+      if (
+        this.stageLocked
+        || runId !== this.runId
+        || stageSequence !== this.stageSequence
+      ) {
         return;
       }
       tween(bubble).stop();
       tween(bubble)
-        .to(0.08, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'quadOut' })
+        .to(
+          0.08,
+          { scale: new Vec3(0.94, 0.94, 1) },
+          { easing: 'quadOut' },
+        )
         .start();
     });
     bubble.on(Node.EventType.TOUCH_CANCEL, () => {
@@ -302,20 +346,37 @@ export class BubbleGamePage extends PageController {
         this.stageLocked = true;
         this.gameAudio?.play('success');
         void this.customVoice?.playRandom(['correct', 'great'], 1000);
-        this.createBubblePop(this.stageRoot as Node, bubble.position, bubble.scale.x * 78);
+        this.createBubblePop(
+          this.stageRoot as Node,
+          bubble.position,
+          bubble.scale.x * 78,
+        );
         const opacity = bubble.getComponent(UIOpacity)!;
         tween(opacity).stop().to(0.22, { opacity: 0 }).start();
         tween(bubble)
           .stop()
-          .to(0.1, { scale: new Vec3(1.18, 1.18, 1) }, { easing: 'quadOut' })
-          .to(0.18, { scale: new Vec3(0.08, 0.08, 1) }, { easing: 'quadIn' })
+          .to(
+            0.1,
+            { scale: new Vec3(1.18, 1.18, 1) },
+            { easing: 'quadOut' },
+          )
+          .to(
+            0.18,
+            { scale: new Vec3(0.08, 0.08, 1) },
+            { easing: 'quadIn' },
+          )
           .delay(0.2)
           .call(() => {
             if (runId !== this.runId || stageSequence !== this.stageSequence) {
               return;
             }
             this.stageIndex++;
-            this.renderStage(this.contentRoot as Node, levelIndex, runId);
+            this.renderStage(
+              this.contentRoot as Node,
+              levelIndex,
+              difficulty,
+              runId,
+            );
           })
           .start();
         return;
@@ -324,11 +385,16 @@ export class BubbleGamePage extends PageController {
       void this.customVoice?.play('retry', 2600);
       tween(bubble)
         .stop()
-        .to(0.07, { position: new Vec3(rest.x - 12, rest.y, 0), scale: Vec3.ONE })
+        .to(
+          0.07,
+          { position: new Vec3(rest.x - 12, rest.y, 0), scale: Vec3.ONE },
+        )
         .to(0.07, { position: new Vec3(rest.x + 12, rest.y, 0) })
         .to(0.07, { position: new Vec3(rest.x - 8, rest.y, 0) })
         .to(0.09, { position: new Vec3(rest.x, rest.y, 0) })
-        .call(() => this.startFloating(bubble, new Vec3(rest.x, rest.y, 0), index))
+        .call(() => (
+          this.startFloating(bubble, new Vec3(rest.x, rest.y, 0), index)
+        ))
         .start();
     });
   }
@@ -346,7 +412,11 @@ export class BubbleGamePage extends PageController {
           .to(
             1.25 + (index % 3) * 0.12,
             {
-              position: new Vec3(rest.x + (index % 2 === 0 ? 5 : -5), rest.y + 9, 0),
+              position: new Vec3(
+                rest.x + (index % 2 === 0 ? 5 : -5),
+                rest.y + 9,
+                0,
+              ),
               scale: new Vec3(1.018, 1.018, 1),
             },
             { easing: 'sineInOut' },
@@ -400,23 +470,27 @@ export class BubbleGamePage extends PageController {
     }
   }
 
-  private finishLevel(levelIndex: number): void {
+  private finishLevel(
+    levelIndex: number,
+    difficulty: DifficultyStars,
+  ): void {
     const artworks = this.puzzleArtworks as PuzzleArtwork[];
     const artwork = this.activeArtwork;
     if (!artwork) {
       this.onExit();
       return;
     }
-    const stars = getLevelDifficulty(levelIndex, artworks.length);
-    miniGameProgress.award('bubble', artwork.id, stars);
+    miniGameProgress.award('bubble', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
-    new MiniGameCelebration(this.app).show(this.contentRoot as Node, {
-      title: getMiniGameDefinition('bubble').completionText,
-      stars,
-      onReplay: () => this.show(levelIndex),
-      onNext: () => this.show(getNextLevelIndex(levelIndex, artworks.length)),
-      onExit: () => this.leave(),
+    new GameCompletionModal(this.app).show(this.contentRoot as Node, {
+      stars: difficulty,
+      onReplay: () => this.show(levelIndex, difficulty),
+      onNext: () => this.show(
+        getNextLevelIndex(levelIndex, artworks.length),
+        difficulty,
+      ),
+      onMenu: () => this.leave(),
     });
   }
 
