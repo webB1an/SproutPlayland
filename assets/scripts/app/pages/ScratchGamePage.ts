@@ -6,13 +6,14 @@ import {
   UIOpacity,
   Vec3,
 } from 'cc';
+import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
+import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createSeededRandom,
-  getLevelDifficulty,
+  type DifficultyStars,
   getNextLevelIndex,
-  MiniGameCelebration,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
@@ -22,6 +23,37 @@ type ScratchPatch = {
   x: number;
   y: number;
   revealed: boolean;
+};
+
+type ScratchDifficultySettings = {
+  columns: number;
+  rows: number;
+  brushRadius: number;
+  completionRatio: number;
+};
+
+const SCRATCH_DIFFICULTY_SETTINGS: Record<
+  DifficultyStars,
+  ScratchDifficultySettings
+> = {
+  1: {
+    columns: 6,
+    rows: 6,
+    brushRadius: 104,
+    completionRatio: 0.58,
+  },
+  2: {
+    columns: 7,
+    rows: 7,
+    brushRadius: 84,
+    completionRatio: 0.68,
+  },
+  3: {
+    columns: 8,
+    rows: 8,
+    brushRadius: 70,
+    completionRatio: 0.78,
+  },
 };
 
 export class ScratchGamePage extends PageController {
@@ -36,7 +68,7 @@ export class ScratchGamePage extends PageController {
     super(app);
   }
 
-  show(levelIndex: number): void {
+  show(levelIndex: number, difficulty: DifficultyStars = 1): void {
     const runId = ++this.runId;
     this.completed = false;
     this.patches = [];
@@ -51,6 +83,7 @@ export class ScratchGamePage extends PageController {
       return;
     }
     const definition = getMiniGameDefinition('scratch');
+    const accent = this.toColor(definition.palette.accent);
     const root = this.resetScreen('ScratchGame');
     this.drawFullBackground(root, this.toColor(definition.palette.background));
     this.createCircle(root, -620, -330, 190, new Color(255, 211, 125, 65));
@@ -65,6 +98,14 @@ export class ScratchGamePage extends PageController {
       new Color(82, 99, 73, 255),
       620,
       54,
+    );
+    createMiniGameDifficultyBadge(
+      this.app,
+      root,
+      difficulty,
+      this.visibleWidth / 2 - 110,
+      310,
+      accent,
     );
 
     const boardSize = 520;
@@ -108,7 +149,7 @@ export class ScratchGamePage extends PageController {
       34,
     );
 
-    this.createCloudCover(board, levelIndex, boardSize);
+    this.createCloudCover(board, levelIndex, boardSize, difficulty);
     this.createProgress(root);
     this.handHint = this.createHandHint(board);
 
@@ -123,29 +164,43 @@ export class ScratchGamePage extends PageController {
       const point = this.touchToRoot(event);
       const localX = point.x - board.position.x;
       const localY = point.y - board.position.y;
-      this.revealNear(localX, localY, runId, image, artwork, levelIndex);
+      this.revealNear(
+        localX,
+        localY,
+        runId,
+        image,
+        artwork,
+        levelIndex,
+        difficulty,
+      );
     };
     board.on(Node.EventType.TOUCH_START, revealAt);
     board.on(Node.EventType.TOUCH_MOVE, revealAt);
   }
 
-  private createCloudCover(parent: Node, levelIndex: number, boardSize: number): void {
-    const random = createSeededRandom(3419 + levelIndex * 97);
-    const columns = 7;
-    const rows = 7;
-    const stepX = boardSize / (columns - 0.65);
-    const stepY = boardSize / (rows - 0.65);
+  private createCloudCover(
+    parent: Node,
+    levelIndex: number,
+    boardSize: number,
+    difficulty: DifficultyStars,
+  ): void {
+    const settings = SCRATCH_DIFFICULTY_SETTINGS[difficulty];
+    const random = createSeededRandom(
+      3419 + levelIndex * 97 + difficulty * 1009,
+    );
+    const stepX = boardSize / (settings.columns - 0.65);
+    const stepY = boardSize / (settings.rows - 0.65);
     const startX = -boardSize / 2 + stepX * 0.34;
     const startY = boardSize / 2 - stepY * 0.34;
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
-        const x = startX + column * stepX + (random() - 0.5) * 18;
-        const y = startY - row * stepY + (random() - 0.5) * 18;
+    for (let row = 0; row < settings.rows; row++) {
+      for (let column = 0; column < settings.columns; column++) {
+        const x = startX + column * stepX + (random() - 0.5) * 16;
+        const y = startY - row * stepY + (random() - 0.5) * 16;
         const patch = this.createCloudPatch(
           parent,
           x,
           y,
-          0.88 + random() * 0.28,
+          0.84 + random() * 0.25,
           random(),
         );
         this.patches.push({ node: patch, x, y, revealed: false });
@@ -257,9 +312,11 @@ export class ScratchGamePage extends PageController {
     image: Node,
     artwork: PuzzleArtwork,
     levelIndex: number,
+    difficulty: DifficultyStars,
   ): void {
     let changed = false;
-    const brushRadiusSquared = 82 * 82;
+    const settings = SCRATCH_DIFFICULTY_SETTINGS[difficulty];
+    const brushRadiusSquared = settings.brushRadius * settings.brushRadius;
     for (const patch of this.patches) {
       if (patch.revealed) {
         continue;
@@ -300,8 +357,8 @@ export class ScratchGamePage extends PageController {
     this.gameAudio?.play('pickup');
     const progress = this.revealedCount / this.patches.length;
     this.updateProgress(progress);
-    if (progress >= 0.7) {
-      this.complete(runId, image, artwork, levelIndex);
+    if (progress >= settings.completionRatio) {
+      this.complete(runId, image, artwork, levelIndex, difficulty);
     }
   }
 
@@ -319,6 +376,7 @@ export class ScratchGamePage extends PageController {
     image: Node,
     artwork: PuzzleArtwork,
     levelIndex: number,
+    difficulty: DifficultyStars,
   ): void {
     if (this.completed || runId !== this.runId) {
       return;
@@ -356,24 +414,28 @@ export class ScratchGamePage extends PageController {
         if (runId !== this.runId || !image.isValid) {
           return;
         }
-        this.showCompletion(artwork, levelIndex);
+        this.showCompletion(artwork, levelIndex, difficulty);
       })
       .start();
   }
 
-  private showCompletion(artwork: PuzzleArtwork, levelIndex: number): void {
+  private showCompletion(
+    artwork: PuzzleArtwork,
+    levelIndex: number,
+    difficulty: DifficultyStars,
+  ): void {
     const artworks = this.puzzleArtworks as PuzzleArtwork[];
-    const stars = getLevelDifficulty(levelIndex, artworks.length);
-    miniGameProgress.award('scratch', artwork.id, stars);
+    miniGameProgress.award('scratch', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
-    const parent = this.contentRoot as Node;
-    new MiniGameCelebration(this.app).show(parent, {
-      title: getMiniGameDefinition('scratch').completionText,
-      stars,
-      onReplay: () => this.show(levelIndex),
-      onNext: () => this.show(getNextLevelIndex(levelIndex, artworks.length)),
-      onExit: () => this.leave(),
+    new GameCompletionModal(this.app).show(this.contentRoot as Node, {
+      stars: difficulty,
+      onReplay: () => this.show(levelIndex, difficulty),
+      onNext: () => this.show(
+        getNextLevelIndex(levelIndex, artworks.length),
+        difficulty,
+      ),
+      onMenu: () => this.leave(),
     });
   }
 
