@@ -53,8 +53,12 @@ export class MemoryGamePage extends PageController {
     const pairCount = difficulty + 1;
     const artworks = getWrappedArtworks(allArtworks, levelIndex, pairCount);
     const random = createSeededRandom(9059 + levelIndex * 131);
+    const pairedArtworks: PuzzleArtwork[] = [];
+    for (const artwork of artworks) {
+      pairedArtworks.push(artwork, artwork);
+    }
     const deck = shuffleWithRandom(
-      artworks.flatMap((artwork) => [artwork, artwork]),
+      pairedArtworks,
       random,
     );
     const definition = getMiniGameDefinition('memory');

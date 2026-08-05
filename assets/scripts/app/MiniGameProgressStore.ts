@@ -40,7 +40,13 @@ export class MiniGameProgressStore {
     if (!gameProgress) {
       return 0;
     }
-    return Object.values(gameProgress).filter((stars) => this.normalizeStars(stars) > 0).length;
+    let completed = 0;
+    for (const levelId of Object.keys(gameProgress)) {
+      if (this.normalizeStars(gameProgress[levelId]) > 0) {
+        completed++;
+      }
+    }
+    return completed;
   }
 
   private normalizeStars(value: number): number {
@@ -63,7 +69,8 @@ export class MiniGameProgressStore {
           continue;
         }
         const target: GameProgress = {};
-        for (const [levelId, stars] of Object.entries(source)) {
+        for (const levelId of Object.keys(source)) {
+          const stars = (source as Record<string, unknown>)[levelId];
           if (typeof stars === 'number') {
             target[levelId] = this.normalizeStars(stars);
           }
