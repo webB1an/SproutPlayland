@@ -1,211 +1,364 @@
 import {
   Color,
-  EventTouch,
   Node,
   tween,
   Vec3,
 } from 'cc';
+import {
+  GAME_CARDS,
+  isMiniGameId,
+  type GameCardDefinition,
+  type GameCardId,
+  type MiniGameId,
+} from '../GameRegistry';
 import { PageController } from '../PageController';
+import { ArtworkGameSelectPage } from './ArtworkGameSelectPage';
 
 export class HomePage extends PageController {
   show(): void {
     const root = this.resetScreen('Home');
     this.drawFullBackground(root, new Color(242, 236, 218, 255));
-    this.createCircle(root, -615, 300, 160, new Color(224, 239, 198, 105));
-    this.createCircle(root, 610, -330, 190, new Color(255, 220, 162, 72));
-    this.createCircle(root, 42, 350, 78, new Color(205, 235, 224, 70));
-
-    this.createCircle(root, -430, 0, 235, new Color(232, 241, 205, 135));
-    this.createCircle(root, -430, -6, 188, new Color(255, 246, 211, 135));
-    if (this.frames.has('home-island')) {
-      const islandShadow = this.createPanel(
-        root,
-        'HomeIslandShadow',
-        -430,
-        -126,
-        310,
-        58,
-        new Color(84, 105, 66, 32),
-        29,
-      );
-      const island = this.createImage(root, 'home-island', -430, 8, 470, 470);
-      this.makeHomeIslandInteractive(island, islandShadow);
-    } else {
-      this.createSproutMark(root, -430, 16, 1.7);
-    }
-    this.createPuzzleCard(root, 218, 0);
+    this.createCircle(root, -635, 320, 170, new Color(224, 239, 198, 112));
+    this.createCircle(root, 635, -338, 190, new Color(255, 220, 162, 78));
+    this.createCircle(root, 360, 350, 82, new Color(205, 235, 224, 72));
+    this.createHeader(root);
+    this.createGameShelf(root);
     this.createVoiceSettingsButton(root);
   }
 
-  private makeHomeIslandInteractive(island: Node, shadow: Node): void {
-    const islandRest = island.position.clone();
-    const shadowRest = shadow.position.clone();
-    let dragging = false;
-    let touchStartX = 0;
-    let touchStartY = 0;
-
-    const startIdleMotion = () => {
-      if (!island.isValid || !shadow.isValid || dragging) {
-        return;
-      }
+  private createHeader(parent: Node): void {
+    const mark = this.createUiNode('HomeBrand', parent, -496, 292, 220, 112);
+    if (this.frames.has('home-island')) {
+      const island = this.createImage(mark, 'home-island', -56, -1, 118, 118);
       tween(island)
-        .stop()
         .repeatForever(
           tween<Node>()
             .to(
-              2.4,
+              2.2,
               {
-                position: new Vec3(islandRest.x, islandRest.y + 4, islandRest.z),
-                scale: new Vec3(1.006, 1.006, 1),
-                eulerAngles: new Vec3(0.7, -1, 0.25),
+                position: new Vec3(-56, 4, 0),
+                eulerAngles: new Vec3(0.5, -0.8, 0.4),
               },
               { easing: 'sineInOut' },
             )
             .to(
-              2.4,
+              2.2,
               {
-                position: new Vec3(islandRest.x, islandRest.y - 2, islandRest.z),
-                scale: new Vec3(0.998, 0.998, 1),
-                eulerAngles: new Vec3(-0.45, 0.8, -0.2),
+                position: new Vec3(-56, -3, 0),
+                eulerAngles: new Vec3(-0.4, 0.7, -0.3),
               },
               { easing: 'sineInOut' },
             ),
         )
         .start();
-      tween(shadow)
-        .stop()
-        .repeatForever(
-          tween<Node>()
-            .to(
-              2.4,
-              {
-                position: new Vec3(shadowRest.x, shadowRest.y - 2, shadowRest.z),
-                scale: new Vec3(0.96, 0.92, 1),
-              },
-              { easing: 'sineInOut' },
-            )
-            .to(
-              2.4,
-              {
-                position: new Vec3(shadowRest.x, shadowRest.y + 1, shadowRest.z),
-                scale: new Vec3(1.02, 1, 1),
-              },
-              { easing: 'sineInOut' },
-            ),
-        )
-        .start();
-    };
-
-    island.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
-      const location = event.getUILocation();
-      dragging = true;
-      this.gameAudio?.play('pickup');
-      touchStartX = location.x;
-      touchStartY = location.y;
-      tween(island).stop();
-      tween(shadow).stop();
-      island.setPosition(islandRest);
-      island.setScale(new Vec3(1.024, 1.024, 1));
-      island.eulerAngles = Vec3.ZERO;
-      shadow.setPosition(shadowRest);
-      shadow.setScale(new Vec3(1.05, 0.9, 1));
-    });
-
-    island.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
-      if (!dragging) {
-        return;
-      }
-      const location = event.getUILocation();
-      const deltaX = location.x - touchStartX;
-      const deltaY = location.y - touchStartY;
-      const offsetX = this.clamp(deltaX * 0.035, -11, 11);
-      const offsetY = this.clamp(deltaY * 0.028, -8, 8);
-      const tiltX = this.clamp(-deltaY * 0.035, -5, 5);
-      const tiltY = this.clamp(deltaX * 0.04, -7, 7);
-      const tiltZ = this.clamp(-deltaX * 0.007, -1.2, 1.2);
-
-      island.setPosition(
-        islandRest.x + offsetX,
-        islandRest.y + offsetY,
-        islandRest.z,
-      );
-      island.eulerAngles = new Vec3(tiltX, tiltY, tiltZ);
-      shadow.setPosition(
-        shadowRest.x - offsetX * 0.35,
-        shadowRest.y - offsetY * 0.2,
-        shadowRest.z,
-      );
-      shadow.setScale(new Vec3(
-        1.04 + Math.abs(tiltY) * 0.006,
-        0.9 - Math.abs(tiltX) * 0.008,
-        1,
-      ));
-    });
-
-    const releaseIsland = () => {
-      if (!dragging) {
-        return;
-      }
-      dragging = false;
-      this.gameAudio?.play('drop');
-      tween(island)
-        .stop()
-        .to(
-          0.52,
-          {
-            position: islandRest,
-            scale: Vec3.ONE,
-            eulerAngles: Vec3.ZERO,
-          },
-          { easing: 'backOut' },
-        )
-        .call(startIdleMotion)
-        .start();
-      tween(shadow)
-        .stop()
-        .to(
-          0.4,
-          {
-            position: shadowRest,
-            scale: Vec3.ONE,
-          },
-          { easing: 'quadOut' },
-        )
-        .start();
-    };
-
-    island.on(Node.EventType.TOUCH_END, releaseIsland);
-    island.on(Node.EventType.TOUCH_CANCEL, releaseIsland);
-    startIdleMotion();
+    } else {
+      this.createSproutMark(mark, -56, 0, 0.68);
+    }
+    this.createLabel(
+      mark,
+      '小芽智趣岛',
+      56,
+      12,
+      36,
+      new Color(63, 91, 64, 255),
+      250,
+      55,
+    );
+    this.createLabel(
+      mark,
+      '点一个喜欢的游戏开始吧',
+      64,
+      -30,
+      19,
+      new Color(111, 128, 96, 255),
+      280,
+      36,
+    );
   }
 
-  private createPuzzleCard(
+  private createGameShelf(parent: Node): void {
+    const cardWidth = 210;
+    const gap = 30;
+    const totalWidth = GAME_CARDS.length * cardWidth + (GAME_CARDS.length - 1) * gap;
+    const startX = -totalWidth / 2 + cardWidth / 2;
+    this.createPanel(
+      parent,
+      'ShelfDepth',
+      0,
+      -250,
+      totalWidth + 70,
+      38,
+      new Color(126, 97, 67, 30),
+      19,
+    );
+    GAME_CARDS.forEach((definition, index) => {
+      this.createGameCard(
+        parent,
+        definition,
+        startX + index * (cardWidth + gap),
+        -28,
+        cardWidth,
+      );
+    });
+  }
+
+  private createGameCard(
     parent: Node,
+    definition: GameCardDefinition,
     x: number,
     y: number,
+    width: number,
   ): void {
-    this.createPanel(parent, 'CategoryShadow', x + 3, y - 8, 230, 420, new Color(91, 75, 53, 20), 44);
+    const height = 392;
+    const cardColor = this.toColor(definition.palette.card);
+    const depthColor = this.toColor(definition.palette.depth);
+    const accentColor = this.toColor(definition.palette.accent);
+    this.createPanel(
+      parent,
+      `${definition.id}CardDepth`,
+      x + 4,
+      y - 10,
+      width,
+      height,
+      new Color(depthColor.r, depthColor.g, depthColor.b, 84),
+      42,
+    );
     const card = this.createPanel(
       parent,
-      'puzzleCard',
+      `${definition.id}Card`,
       x,
       y,
-      230,
-      420,
-      new Color(223, 240, 197, 255),
-      44,
-      new Color(255, 255, 244, 200),
+      width,
+      height,
+      cardColor,
+      42,
+      new Color(255, 255, 244, 215),
       4,
     );
-    this.createCircle(card, 0, 52, 98, new Color(255, 255, 245, 185));
-    if (this.frames.has('shape-regular-selected')) {
-      this.createImage(card, 'shape-regular-selected', 0, 56, 166, 166);
-    } else {
-      this.createPuzzleGridMark(card, 4, 0, 55, true);
+    this.createCircle(card, 0, 70, 82, new Color(255, 255, 244, 175));
+    this.createGameIcon(card, definition.id, accentColor);
+    this.createLabel(
+      card,
+      definition.title,
+      0,
+      -74,
+      27,
+      new Color(63, 79, 66, 255),
+      width - 24,
+      42,
+    );
+    this.createLabel(
+      card,
+      definition.subtitle,
+      0,
+      -112,
+      17,
+      new Color(96, 111, 91, 255),
+      width - 20,
+      34,
+    );
+    this.createCircle(card, 0, -158, 29, new Color(depthColor.r, depthColor.g, depthColor.b, 255));
+    this.createLabel(
+      card,
+      '›',
+      1,
+      -154,
+      39,
+      new Color(255, 255, 244, 255),
+      44,
+      44,
+    );
+    this.makeButton(card, () => this.openGame(definition.id));
+  }
+
+  private createGameIcon(parent: Node, gameId: GameCardId, accent: Color): void {
+    if (gameId === 'puzzle') {
+      this.createPuzzleIcon(parent, accent);
+      return;
     }
-    this.createCircle(card, 0, -132, 34, new Color(111, 169, 89, 255));
-    this.createLabel(card, '›', 2, -128, 43, new Color(255, 255, 244, 255), 50, 50);
-    this.makeButton(card, () => this.showCategory('puzzle'));
+    if (gameId === 'scratch') {
+      this.createScratchIcon(parent, accent);
+      return;
+    }
+    if (gameId === 'shadow') {
+      this.createShadowIcon(parent, accent);
+      return;
+    }
+    if (gameId === 'bubble') {
+      this.createBubbleIcon(parent, accent);
+      return;
+    }
+    this.createMemoryIcon(parent, accent);
+  }
+
+  private createPuzzleIcon(parent: Node, accent: Color): void {
+    const cellSize = 52;
+    const gap = 7;
+    for (let row = 0; row < 2; row++) {
+      for (let column = 0; column < 2; column++) {
+        const tile = this.createPanel(
+          parent,
+          'PuzzleIconTile',
+          (column - 0.5) * (cellSize + gap),
+          70 + (0.5 - row) * (cellSize + gap),
+          cellSize,
+          cellSize,
+          row === column
+            ? accent
+            : new Color(255, 211, 92, 255),
+          13,
+          new Color(255, 255, 246, 190),
+          3,
+        );
+        tile.angle = (row * 2 + column - 1.5) * 1.8;
+      }
+    }
+  }
+
+  private createScratchIcon(parent: Node, accent: Color): void {
+    this.createPanel(
+      parent,
+      'ScratchPicture',
+      0,
+      70,
+      116,
+      112,
+      new Color(126, 205, 220, 255),
+      23,
+      new Color(255, 255, 246, 220),
+      4,
+    );
+    this.createSunMark(parent, 14, 82, 0.28);
+    this.createCircle(parent, -35, 58, 26, new Color(111, 176, 98, 255));
+    this.createCircle(parent, -26, 89, 30, new Color(250, 248, 231, 255));
+    this.createCircle(parent, 6, 98, 37, new Color(250, 248, 231, 255));
+    this.createCircle(parent, 42, 84, 28, new Color(250, 248, 231, 255));
+    this.createPanel(parent, 'ScratchCloudBase', 6, 70, 102, 42, new Color(250, 248, 231, 255), 21);
+    const finger = this.createPanel(
+      parent,
+      'ScratchFinger',
+      47,
+      36,
+      18,
+      60,
+      accent,
+      9,
+    );
+    finger.angle = -28;
+  }
+
+  private createShadowIcon(parent: Node, accent: Color): void {
+    const back = this.createPanel(
+      parent,
+      'ShadowSlot',
+      -24,
+      82,
+      84,
+      106,
+      new Color(86, 80, 99, 128),
+      22,
+    );
+    back.angle = -7;
+    const front = this.createPanel(
+      parent,
+      'ShadowPiece',
+      30,
+      60,
+      84,
+      106,
+      accent,
+      22,
+      new Color(255, 255, 246, 205),
+      4,
+    );
+    front.angle = 7;
+    this.createCircle(front, 0, 14, 22, new Color(255, 231, 139, 255));
+    this.createTriangle(front, 0, -23, 42, 38, new Color(255, 250, 223, 255));
+  }
+
+  private createBubbleIcon(parent: Node, accent: Color): void {
+    const bubbles = [
+      { x: -37, y: 58, radius: 38 },
+      { x: 24, y: 88, radius: 49 },
+      { x: 45, y: 40, radius: 26 },
+    ];
+    bubbles.forEach((bubble, index) => {
+      this.createCircle(
+        parent,
+        bubble.x + 4,
+        bubble.y - 5,
+        bubble.radius,
+        new Color(69, 126, 151, 38),
+      );
+      const body = this.createCircle(
+        parent,
+        bubble.x,
+        bubble.y,
+        bubble.radius,
+        new Color(accent.r, accent.g, accent.b, 210 - index * 24),
+      );
+      this.createCircle(
+        body,
+        -bubble.radius * 0.25,
+        bubble.radius * 0.28,
+        Math.max(5, bubble.radius * 0.12),
+        new Color(255, 255, 255, 185),
+      );
+    });
+  }
+
+  private createMemoryIcon(parent: Node, accent: Color): void {
+    const back = this.createPanel(
+      parent,
+      'MemoryBackCard',
+      -29,
+      78,
+      86,
+      118,
+      new Color(133, 111, 175, 255),
+      20,
+      new Color(255, 242, 250, 220),
+      4,
+    );
+    back.angle = -8;
+    const front = this.createPanel(
+      parent,
+      'MemoryFrontCard',
+      29,
+      60,
+      86,
+      118,
+      accent,
+      20,
+      new Color(255, 242, 250, 220),
+      4,
+    );
+    front.angle = 8;
+    this.createPuzzleStarMark(front, 0, 0, 54, true);
+  }
+
+  private openGame(gameId: GameCardId): void {
+    if (!isMiniGameId(gameId)) {
+      this.showCategory('puzzle');
+      return;
+    }
+    this.openMiniGame(gameId);
+  }
+
+  private openMiniGame(gameId: MiniGameId): void {
+    const navigationSequence = ++this.navigationSequence;
+    this.customVoice?.stopPlayback();
+    const page = new ArtworkGameSelectPage(this.app);
+    if (this.loadedArtDirectories.has('art/games/puzzle')) {
+      page.show(gameId);
+      return;
+    }
+    page.showLoading(gameId);
+    void this.loadArtDirectory('art/games/puzzle').then(() => {
+      if (navigationSequence === this.navigationSequence) {
+        page.show(gameId);
+      }
+    });
   }
 
   private createVoiceSettingsButton(parent: Node): void {
@@ -265,4 +418,7 @@ export class HomePage extends PageController {
     this.makeButton(button, () => this.showVoiceSettings());
   }
 
+  private toColor(rgb: readonly [number, number, number]): Color {
+    return new Color(rgb[0], rgb[1], rgb[2], 255);
+  }
 }
