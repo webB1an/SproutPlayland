@@ -16,6 +16,7 @@ import {
   SpriteFrame,
   sys,
   Texture2D,
+  Tween,
   tween,
   UIOpacity,
   UITransform,
@@ -89,6 +90,7 @@ export class SproutPlaylandApp extends Component {
   private gameAudio: GameAudioController | null = null;
   private customVoice: CustomVoiceController | null = null;
   private customVoiceUnsubscribe: (() => void) | null = null;
+  private wechatMemoryWarningHandler: ((result: { level?: number }) => void) | null = null;
   private readonly puzzleInteraction = new PuzzleInteractionController({
     touchToRoot: (event) => this.touchToRoot(event),
     isCompleted: () => this.completed,
@@ -141,7 +143,7 @@ export class SproutPlaylandApp extends Component {
       }
     });
     this.loadPuzzleStars();
-    void this.restoreSavedCustomPuzzlePhoto();
+    this.installWechatMemoryDiagnostics();
     view.resizeWithBrowserSize(true);
     this.applyResponsiveResolutionPolicy(true);
     const visibleSize = view.getVisibleSize();
@@ -171,6 +173,11 @@ export class SproutPlaylandApp extends Component {
     this.customVoiceUnsubscribe = null;
     this.customVoice?.dispose();
     this.customVoice = null;
+    const wxApi = (globalThis as any).wx;
+    if (this.wechatMemoryWarningHandler) {
+      wxApi?.offMemoryWarning?.(this.wechatMemoryWarningHandler);
+      this.wechatMemoryWarningHandler = null;
+    }
     this.releaseCustomPuzzlePhoto();
   }
 
@@ -179,6 +186,7 @@ export class SproutPlaylandApp extends Component {
     this.customVoice?.stopPlayback();
     this.releaseArtworkSources();
     this.homePage.show();
+    this.releaseCustomPuzzlePhotoAfterTransition();
   }
   private showVoiceSettings(): void {
     this.navigationSequence++;
@@ -188,12 +196,11 @@ export class SproutPlaylandApp extends Component {
   private showCategory(category: CategoryId): void {
     const navigationSequence = ++this.navigationSequence;
     this.releaseArtworkSources();
-    if (this.loadedArtDirectories.has('art/games/puzzle')) {
-      this.puzzleSelectPage.show();
-      return;
-    }
     this.puzzleSelectPage.showLoading();
-    void this.loadArtDirectory('art/games/puzzle').then(() => {
+    void Promise.all([
+      this.loadArtDirectory('art/games/puzzle'),
+      this.restoreSavedCustomPuzzlePhoto(),
+    ]).then(() => {
       if (navigationSequence === this.navigationSequence) {
         this.puzzleSelectPage.show();
       }
@@ -641,9 +648,15 @@ export class SproutPlaylandApp extends Component {
       .start();
     if (previousRoot?.isValid) {
       const staleRoot = previousRoot;
+      if (staleRoot.name === 'Puzzle') {
+        // PuzzlePieceState keeps references to the complete node hierarchy.
+        // Drop those references as soon as the page is left so the old board
+        // can be reclaimed after the transition.
+        this.pieces = [];
+      }
       this.scheduleOnce(() => {
         if (staleRoot.isValid) {
-          staleRoot.destroy();
+          this.destroyScreenRoot(staleRoot);
         }
       }, 0.3);
     }
@@ -997,9 +1010,9 @@ export class SproutPlaylandApp extends Component {
       // 部分旧版微信不支持指定尺寸，仍可使用 chooseMedia 的压缩图。
       fail: () => openPhoto(path),
     };
-    if (width && height && Math.max(width, height) > 1536) {
+    if (width && height && Math.max(width, height) > 1024) {
       // 只指定长边，让微信按原始宽高比等比缩放。
-      options[width >= height ? 'compressedWidth' : 'compressedHeight'] = 1536;
+      options[width >= height ? 'compressedWidth' : 'compressedHeight'] = 1024;
     }
     wxApi.compressImage(options);
   }
@@ -1106,6 +1119,9 @@ export class SproutPlaylandApp extends Component {
   }
 
   private restoreSavedCustomPuzzlePhoto(): Promise<void> {
+    if (this.customPuzzleFrameName && this.frames.has(this.customPuzzleFrameName)) {
+      return Promise.resolve();
+    }
     const platform = globalThis as unknown as {
       wx?: { getFileSystemManager?: () => unknown };
     };
@@ -1215,6 +1231,57 @@ export class SproutPlaylandApp extends Component {
     this.ownedCustomPuzzleFrame = null;
     this.ownedCustomPuzzleTexture = null;
     this.ownedCustomPuzzleImage = null;
+  }
+
+  private releaseCustomPuzzlePhotoAfterTransition(): void {
+    const frameName = this.customPuzzleFrameName;
+    if (!frameName) {
+      return;
+    }
+    this.scheduleOnce(() => {
+      if (
+        this.contentRoot?.name === 'Home'
+        && this.customPuzzleFrameName === frameName
+      ) {
+        this.releaseCustomPuzzlePhoto();
+      }
+    }, 0.45);
+  }
+
+  private destroyScreenRoot(root: Node): void {
+    const stopTweens = (node: Node): void => {
+      Tween.stopAllByTarget(node);
+      for (const component of node.getComponents(Component)) {
+        // Node-targeted tweens are lifecycle-aware in Creator 3.8, but
+        // component-targeted repeatForever tweens are not.
+        Tween.stopAllByTarget(component);
+      }
+      for (const child of node.children) {
+        stopTweens(child);
+      }
+    };
+    stopTweens(root);
+    root.destroy();
+  }
+
+  private installWechatMemoryDiagnostics(): void {
+    const wxApi = (globalThis as any).wx;
+    if (!wxApi?.onMemoryWarning || this.wechatMemoryWarningHandler) {
+      return;
+    }
+    this.wechatMemoryWarningHandler = (result: { level?: number }) => {
+      if (this.contentRoot?.name !== 'Puzzle') {
+        this.pieces = [];
+      }
+      console.warn('[Memory] WeChat memory warning', {
+        level: result?.level,
+        screen: this.contentRoot?.name ?? 'unknown',
+        cachedFrames: this.frames.size,
+        puzzlePieces: this.pieces.length,
+      });
+      wxApi.triggerGC?.();
+    };
+    wxApi.onMemoryWarning(this.wechatMemoryWarningHandler);
   }
 
   private createSproutMark(parent: Node, x: number, y: number, scale: number): void {

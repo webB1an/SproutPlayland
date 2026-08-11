@@ -7,6 +7,21 @@ const REMOTE_SERVER_URL = 'https://sprout-playland-assets.wdbzk.com/';
 
 exports.throwError = true;
 
+exports.onBeforeBuild = async function onBeforeBuild(options) {
+  if (options.platform !== 'wechatgame') {
+    return;
+  }
+
+  // Creator decides whether to run the MD5 pipeline before extension hooks can
+  // modify the task. Reject invalid panel settings instead of producing a build
+  // that succeeds locally but cannot match the files deployed by CI.
+  if (!options.md5Cache) {
+    throw new Error('微信远程资源构建必须勾选“MD5 缓存”，请勾选后重新构建。');
+  }
+  options.server = REMOTE_SERVER_URL;
+  console.log('[wechat-subpackage-fix] verified MD5 cache for remote bundles');
+};
+
 function directorySize(directory) {
   let bytes = 0;
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -24,6 +39,24 @@ function moveDirectoryContents(source, destination, shouldMove) {
     }
     fs.renameSync(path.join(source, entry.name), path.join(destination, entry.name));
   }
+}
+
+function moveBundleScriptToMainPackage(source, buildDirectory, bundleName) {
+  if (!fs.existsSync(source)) {
+    return;
+  }
+  const scriptName = fs.readdirSync(source)
+    .find((name) => /^index(?:\.[a-f0-9]+)?\.js$/i.test(name));
+  if (!scriptName) {
+    throw new Error(`Missing preload script for remote bundle: ${bundleName}`);
+  }
+
+  const scriptDirectory = path.join(buildDirectory, 'src', 'bundle-scripts', bundleName);
+  fs.mkdirSync(scriptDirectory, { recursive: true });
+  fs.renameSync(
+    path.join(source, scriptName),
+    path.join(scriptDirectory, scriptName),
+  );
 }
 
 function findSettingsFile(settingsPath) {
@@ -54,6 +87,9 @@ exports.onAfterBuild = async function onAfterBuild(options, result) {
     const destination = path.join(result.paths.remote, bundleName);
     if (fs.existsSync(source)) {
       moveDirectoryContents(source, destination, (name) => !/^index(?:\.[a-f0-9]+)?\.js$/i.test(name));
+      // WeChat's adapter resolves remote-bundle preload scripts from
+      // src/bundle-scripts/<bundle>, not from assets/<bundle>.
+      moveBundleScriptToMainPackage(source, result.dest, bundleName);
     }
     if (!fs.existsSync(destination)) {
       throw new Error(`Missing generated bundle resources: ${destination}`);
@@ -73,7 +109,28 @@ exports.onAfterBuild = async function onAfterBuild(options, result) {
   settings.assets.preloadBundles = Array.isArray(settings.assets.preloadBundles)
     ? settings.assets.preloadBundles.filter((entry) => entry?.bundle !== 'resources')
     : [];
-  settings.assets.downloadMaxConcurrency = 6;
+  // A lower value is more stable on WeChat DevTools and lower-memory tablets,
+  // where too many simultaneous HTTPS handshakes can be disconnected.
+  settings.assets.downloadMaxConcurrency = 3;
+  settings.assets.bundleVers = settings.assets.bundleVers ?? {};
+
+  for (const bundleName of REMOTE_BUNDLE_NAMES) {
+    if (!settings.assets.bundleVers[bundleName]) {
+      const bundleDirectory = path.join(result.paths.remote, bundleName);
+      const versionedConfig = fs.readdirSync(bundleDirectory)
+        .find((name) => /^config\.([a-f0-9]+)\.json$/i.test(name));
+      const match = versionedConfig?.match(/^config\.([a-f0-9]+)\.json$/i);
+      if (match) {
+        settings.assets.bundleVers[bundleName] = match[1];
+      }
+    }
+    if (!settings.assets.bundleVers?.[bundleName]) {
+      throw new Error(
+        `Remote bundle ${bundleName} has no MD5 version. `
+          + 'Reload the wechat-subpackage-fix extension and rebuild.',
+      );
+    }
+  }
   fs.writeFileSync(settingsPath, JSON.stringify(settings), 'utf8');
   console.log(`[wechat-subpackage-fix] remote server: ${REMOTE_SERVER_URL}`);
 
