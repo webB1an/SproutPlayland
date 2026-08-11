@@ -54,6 +54,12 @@ const GAME_ART_BUNDLE = 'dino-art';
 const GAME_ART_DIRECTORY = 'art/games/puzzle';
 const CUSTOM_PUZZLE_PHOTO_STORAGE_KEY = 'sprout-playland:custom-puzzle-photo:v1';
 
+type OwnedCustomPuzzleAssets = {
+  frame: SpriteFrame;
+  texture: Texture2D;
+  image: ImageAsset;
+};
+
 @ccclass('SproutPlaylandApp')
 export class SproutPlaylandApp extends Component {
   private readonly designWidth = DESIGN_WIDTH;
@@ -86,6 +92,7 @@ export class SproutPlaylandApp extends Component {
   private ownedCustomPuzzleFrame: SpriteFrame | null = null;
   private ownedCustomPuzzleTexture: Texture2D | null = null;
   private ownedCustomPuzzleImage: ImageAsset | null = null;
+  private readonly retiredCustomPuzzleAssets = new Set<OwnedCustomPuzzleAssets>();
   private customPhotoOperationSequence = 0;
   private gameAudio: GameAudioController | null = null;
   private customVoice: CustomVoiceController | null = null;
@@ -179,6 +186,10 @@ export class SproutPlaylandApp extends Component {
       this.wechatMemoryWarningHandler = null;
     }
     this.releaseCustomPuzzlePhoto();
+    for (const assets of this.retiredCustomPuzzleAssets) {
+      this.destroyCustomPuzzleAssets(assets.frame, assets.texture, assets.image);
+    }
+    this.retiredCustomPuzzleAssets.clear();
   }
 
   private showHome(): void {
@@ -892,10 +903,13 @@ export class SproutPlaylandApp extends Component {
    * 首页资源不受影响；横图、竖图会在预览和拼图区域中等比居中裁切。
    */
   public useCustomPuzzlePhoto(frame: SpriteFrame, title = '我的照片'): void {
-    this.releaseCustomPuzzlePhoto();
+    const previousAssets = this.takeOwnedCustomPuzzleAssets();
     const frameName = `custom-puzzle-${this.customPuzzleSequence++}`;
     this.customPuzzleFrameName = frameName;
     this.frames.set(frameName, frame);
+    if (previousAssets) {
+      this.retireCustomPuzzleAssets(previousAssets);
+    }
     this.openCustomPuzzlePhoto(frameName, title);
   }
 
@@ -1185,16 +1199,52 @@ export class SproutPlaylandApp extends Component {
   }
 
   private installOwnedCustomPuzzlePhoto(
-    assets: { frame: SpriteFrame; texture: Texture2D; image: ImageAsset },
+    assets: OwnedCustomPuzzleAssets,
   ): string {
-    this.releaseCustomPuzzlePhoto();
+    const previousAssets = this.takeOwnedCustomPuzzleAssets();
     const frameName = `custom-puzzle-${this.customPuzzleSequence++}`;
     this.customPuzzleFrameName = frameName;
     this.frames.set(frameName, assets.frame);
     this.ownedCustomPuzzleFrame = assets.frame;
     this.ownedCustomPuzzleTexture = assets.texture;
     this.ownedCustomPuzzleImage = assets.image;
+    if (previousAssets) {
+      this.retireCustomPuzzleAssets(previousAssets);
+    }
     return frameName;
+  }
+
+  private takeOwnedCustomPuzzleAssets(): OwnedCustomPuzzleAssets | null {
+    if (this.customPuzzleFrameName) {
+      this.frames.delete(this.customPuzzleFrameName);
+      this.customPuzzleFrameName = null;
+    }
+    if (
+      !this.ownedCustomPuzzleFrame
+      || !this.ownedCustomPuzzleTexture
+      || !this.ownedCustomPuzzleImage
+    ) {
+      return null;
+    }
+    const assets = {
+      frame: this.ownedCustomPuzzleFrame,
+      texture: this.ownedCustomPuzzleTexture,
+      image: this.ownedCustomPuzzleImage,
+    };
+    this.ownedCustomPuzzleFrame = null;
+    this.ownedCustomPuzzleTexture = null;
+    this.ownedCustomPuzzleImage = null;
+    return assets;
+  }
+
+  private retireCustomPuzzleAssets(assets: OwnedCustomPuzzleAssets): void {
+    this.retiredCustomPuzzleAssets.add(assets);
+    this.scheduleOnce(() => {
+      if (!this.retiredCustomPuzzleAssets.delete(assets)) {
+        return;
+      }
+      this.destroyCustomPuzzleAssets(assets.frame, assets.texture, assets.image);
+    }, 0.5);
   }
 
   private getImagePathExtension(path: string): string {
@@ -1213,24 +1263,14 @@ export class SproutPlaylandApp extends Component {
   }
 
   private releaseCustomPuzzlePhoto(): void {
-    if (this.customPuzzleFrameName) {
-      this.frames.delete(this.customPuzzleFrameName);
-      this.customPuzzleFrameName = null;
-    }
-    if (
-      this.ownedCustomPuzzleFrame
-      && this.ownedCustomPuzzleTexture
-      && this.ownedCustomPuzzleImage
-    ) {
+    const assets = this.takeOwnedCustomPuzzleAssets();
+    if (assets) {
       this.destroyCustomPuzzleAssets(
-        this.ownedCustomPuzzleFrame,
-        this.ownedCustomPuzzleTexture,
-        this.ownedCustomPuzzleImage,
+        assets.frame,
+        assets.texture,
+        assets.image,
       );
     }
-    this.ownedCustomPuzzleFrame = null;
-    this.ownedCustomPuzzleTexture = null;
-    this.ownedCustomPuzzleImage = null;
   }
 
   private releaseCustomPuzzlePhotoAfterTransition(): void {
