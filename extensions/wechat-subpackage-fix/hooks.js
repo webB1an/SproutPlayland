@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const REMOTE_BUNDLE_NAMES = ['dino-art', 'resources'];
+const REMOTE_SERVER_URL = 'https://sprout-playland-assets.wdbzk.com/';
 
 exports.throwError = true;
 
@@ -67,12 +68,14 @@ exports.onAfterBuild = async function onAfterBuild(options, result) {
         + `${(bundleBytes / 1024 / 1024).toFixed(2)}MB`,
     );
   }
+  settings.assets.server = REMOTE_SERVER_URL;
   settings.assets.remoteBundles = remoteBundles;
   settings.assets.preloadBundles = Array.isArray(settings.assets.preloadBundles)
     ? settings.assets.preloadBundles.filter((entry) => entry?.bundle !== 'resources')
     : [];
   settings.assets.downloadMaxConcurrency = 6;
   fs.writeFileSync(settingsPath, JSON.stringify(settings), 'utf8');
+  console.log(`[wechat-subpackage-fix] remote server: ${REMOTE_SERVER_URL}`);
 
   // `remote` only contains files that are deployed to the static resource server.
   // Keep the directory beside the build for deployment, but never upload it as
