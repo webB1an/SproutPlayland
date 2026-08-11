@@ -35,6 +35,44 @@ const HOME_ICON_FRAMES: Record<GameCardId, string> = {
 export class HomePage extends PageController {
   private railDragging = false;
 
+  showPreloading(): void {
+    const root = this.resetScreen('HomePreloading');
+    this.drawFullBackground(root, new Color(242, 236, 218, 255));
+    this.createCircle(root, -615, 300, 160, new Color(224, 239, 198, 105));
+    this.createCircle(root, 610, -330, 190, new Color(255, 220, 162, 72));
+    this.createCircle(root, 42, 350, 78, new Color(205, 235, 224, 70));
+
+    const mark = this.createUiNode('HomeLoadingMark', root, 0, 22, 190, 190);
+    this.createSproutMark(mark, 0, 0, 0.82);
+    tween(mark)
+      .repeatForever(
+        tween<Node>()
+          .to(0.72, { scale: new Vec3(1.04, 1.04, 1) }, { easing: 'sineInOut' })
+          .to(0.72, { scale: Vec3.ONE }, { easing: 'sineInOut' }),
+      )
+      .start();
+
+    const dotColors = [
+      new Color(111, 169, 126, 255),
+      new Color(239, 187, 75, 255),
+      new Color(121, 190, 230, 255),
+    ];
+    dotColors.forEach((color, index) => {
+      const dot = this.createCircle(root, (index - 1) * 34, -112, 7, color);
+      const opacity = dot.addComponent(UIOpacity);
+      opacity.opacity = 105;
+      tween(opacity)
+        .delay(index * 0.16)
+        .repeatForever(
+          tween<UIOpacity>()
+            .to(0.38, { opacity: 255 }, { easing: 'quadOut' })
+            .to(0.48, { opacity: 105 }, { easing: 'quadIn' })
+            .delay(0.32),
+        )
+        .start();
+    });
+  }
+
   show(): void {
     const root = this.resetScreen('Home');
     this.drawFullBackground(root, new Color(242, 236, 218, 255));

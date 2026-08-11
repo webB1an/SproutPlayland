@@ -204,13 +204,24 @@ build/
 
 远端部署采用内容哈希文件增量合并，不删除旧版本资源，保证旧预览二维码仍可读取其对应资源。该流程只部署服务器资源，不上传或发布微信小游戏版本。
 
+### 日常更新流程
+
 每次修改代码或资源、准备推送前，在项目根目录运行：
 
 ```powershell
 .\tools\prepare-remote-assets.ps1
 ```
 
-该命令会调用本机 Cocos Creator 构建微信小游戏，并把服务器所需内容整理到 `deploy/remote`。随后检查、提交并推送代码和 `deploy/remote`；GitHub Actions 只负责上传，不需要安装自托管 Runner。
+该命令会调用本机 Cocos Creator 构建微信小游戏，并把服务器所需内容整理到 `deploy/remote`。完整操作顺序为：
+
+```powershell
+.\tools\prepare-remote-assets.ps1
+git add -A
+git commit -m "更新游戏内容"
+git push origin main
+```
+
+推送完成后，GitHub Actions 会自动把 `deploy/remote` 上传到服务器。它只负责部署服务器资源，不会上传或发布微信小游戏版本，也不需要安装 Windows 自托管 Runner。
 
 如果刚刚已经完成过 Cocos 构建，只想重新整理现有构建产物，可以运行：
 
@@ -218,13 +229,44 @@ build/
 .\tools\prepare-remote-assets.ps1 -SkipBuild
 ```
 
-首次启用需要在 GitHub 仓库中完成以下配置：
+### 首次部署配置
+
+当前仓库使用以下服务器配置：
+
+```text
+资源域名：https://sprout-playland-assets.wdbzk.com/
+服务器目录：/www/wwwroot/sprout-playland-assets.wdbzk.com/remote
+SSH 主机：121.40.201.86
+SSH 端口：22
+SSH 用户：root
+```
+
+首次为新仓库或新服务器启用时，需要在 GitHub 仓库中完成以下配置：
 
 1. 在 `Settings → Secrets and variables → Actions` 添加：
-   - `DEPLOY_HOST`：服务器地址；
-   - `DEPLOY_PORT`：SSH 端口，通常为 `22`；
-   - `DEPLOY_USER`：拥有资源站目录写权限的 SSH 用户；
+   - `DEPLOY_HOST`：服务器地址，本项目为 `121.40.201.86`；
+   - `DEPLOY_PORT`：SSH 端口，本项目为 `22`；
+   - `DEPLOY_USER`：拥有资源站目录写权限的 SSH 用户，本项目为 `root`；
    - `DEPLOY_SSH_KEY`：对应用户的 SSH 私钥全文；
 2. 将对应公钥加入服务器用户的 `~/.ssh/authorized_keys`。
+
+设置 `DEPLOY_SSH_KEY` 时必须保留 OpenSSH 私钥的完整换行和头尾标记。推荐直接从私钥文件读取，不要先经过可能改变编码或换行的 PowerShell 文本管道：
+
+```powershell
+cmd /d /c "gh secret set DEPLOY_SSH_KEY --repo webB1an/SproutPlayland < C:\path\to\deploy-key"
+```
+
+如果 Actions 日志出现以下错误，通常说明 Secret 中的私钥格式已经损坏，应按上述方式重新写入：
+
+```text
+Load key "...": error in libcrypto
+Permission denied (publickey,...)
+```
+
+部署成功时，Actions 日志会显示：
+
+```text
+Remote assets deployed to /www/wwwroot/sprout-playland-assets.wdbzk.com/remote
+```
 
 也可以在 GitHub Actions 页面手动运行 `Deploy remote game assets`。

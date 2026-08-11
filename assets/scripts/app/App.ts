@@ -137,18 +137,19 @@ export class SproutPlaylandApp extends Component {
     this.visibleHeight = Math.max(this.designHeight, visibleSize.height);
     view.on('canvas-resize', this.handleCanvasResize, this);
 
-    // Do not keep the first frame black while remote artwork is downloading.
-    // Render the lightweight fallback home immediately, then refresh it after
-    // the remote resources bundle becomes available.
-    this.showHome();
-    void Promise.all([
-      this.loadArtDirectory('art/common/home'),
-      this.loadArtDirectory('art/common/ui-generated'),
-      this.loadArtDirectory('art/games/puzzle/ui'),
-    ]).then(() => {
-      if (this.contentRoot?.name === 'Home') {
+    // Keep the incomplete fallback UI hidden. The home island and all game
+    // icons are loaded first, then the complete home page is revealed once.
+    this.homePage.showPreloading();
+    void this.loadArtDirectory('art/common/home').then(() => {
+      if (this.contentRoot?.name === 'HomePreloading') {
         this.showHome();
       }
+      // These assets are not required by the home screen. Warm them in the
+      // background so entering a game remains responsive.
+      void Promise.all([
+        this.loadArtDirectory('art/common/ui-generated'),
+        this.loadArtDirectory('art/games/puzzle/ui'),
+      ]);
     });
   }
 
