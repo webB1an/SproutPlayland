@@ -626,6 +626,7 @@ export class ArtworkGameSelectPage extends PageController {
     const returnToSelect = (): void => {
       this.navigationSequence++;
       this.customVoice?.stopPlayback();
+      this.releaseArtworkSources();
       new ArtworkGameSelectPage(this.app).show(gameId);
     };
     if (gameId === 'scratch') {

@@ -6,6 +6,7 @@ import {
   EventTouch,
   Graphics,
   HorizontalTextAlignment,
+  ImageAsset,
   Label,
   Layers,
   Mask,
@@ -14,6 +15,7 @@ import {
   Sprite,
   SpriteFrame,
   sys,
+  Texture2D,
   tween,
   UIOpacity,
   UITransform,
@@ -49,6 +51,7 @@ const { ccclass } = _decorator;
 
 const GAME_ART_BUNDLE = 'dino-art';
 const GAME_ART_DIRECTORY = 'art/games/puzzle';
+const CUSTOM_PUZZLE_PHOTO_STORAGE_KEY = 'sprout-playland:custom-puzzle-photo:v1';
 
 @ccclass('SproutPlaylandApp')
 export class SproutPlaylandApp extends Component {
@@ -57,6 +60,7 @@ export class SproutPlaylandApp extends Component {
   private visibleWidth = DESIGN_WIDTH;
   private visibleHeight = DESIGN_HEIGHT;
   private resourcesBundleLoad: Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> | null = null;
+  private gameArtBundleLoad: Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> | null = null;
   private fixedWidthLayout = false;
   private contentRoot: Node | null = null;
   private pieces: PuzzlePieceState[] = [];
@@ -64,6 +68,8 @@ export class SproutPlaylandApp extends Component {
   private frames = new Map<string, SpriteFrame>();
   private readonly loadedArtDirectories = new Set<string>();
   private readonly artDirectoryLoads = new Map<string, Promise<void>>();
+  private readonly artworkSourceLoads = new Map<string, Promise<void>>();
+  private readonly loadedArtworkSources = new Map<string, string>();
   private navigationSequence = 0;
   private selectedPieceCount: PuzzlePieceCount = DEFAULT_PIECE_COUNT;
   private selectedPuzzleShape: PuzzleShape = DEFAULT_PUZZLE_SHAPE;
@@ -75,6 +81,11 @@ export class SproutPlaylandApp extends Component {
   private puzzleStars: Record<string, number> = {};
   private currentCompletionStars = 0;
   private customPuzzleSequence = 0;
+  private customPuzzleFrameName: string | null = null;
+  private ownedCustomPuzzleFrame: SpriteFrame | null = null;
+  private ownedCustomPuzzleTexture: Texture2D | null = null;
+  private ownedCustomPuzzleImage: ImageAsset | null = null;
+  private customPhotoOperationSequence = 0;
   private gameAudio: GameAudioController | null = null;
   private customVoice: CustomVoiceController | null = null;
   private customVoiceUnsubscribe: (() => void) | null = null;
@@ -130,6 +141,7 @@ export class SproutPlaylandApp extends Component {
       }
     });
     this.loadPuzzleStars();
+    void this.restoreSavedCustomPuzzlePhoto();
     view.resizeWithBrowserSize(true);
     this.applyResponsiveResolutionPolicy(true);
     const visibleSize = view.getVisibleSize();
@@ -159,11 +171,13 @@ export class SproutPlaylandApp extends Component {
     this.customVoiceUnsubscribe = null;
     this.customVoice?.dispose();
     this.customVoice = null;
+    this.releaseCustomPuzzlePhoto();
   }
 
   private showHome(): void {
     this.navigationSequence++;
     this.customVoice?.stopPlayback();
+    this.releaseArtworkSources();
     this.homePage.show();
   }
   private showVoiceSettings(): void {
@@ -173,6 +187,7 @@ export class SproutPlaylandApp extends Component {
   }
   private showCategory(category: CategoryId): void {
     const navigationSequence = ++this.navigationSequence;
+    this.releaseArtworkSources();
     if (this.loadedArtDirectories.has('art/games/puzzle')) {
       this.puzzleSelectPage.show();
       return;
@@ -217,13 +232,9 @@ export class SproutPlaylandApp extends Component {
         resolve();
       };
       if (path === GAME_ART_DIRECTORY) {
-        assetManager.loadBundle(GAME_ART_BUNDLE, (bundleError, bundle) => {
-          if (bundleError || !bundle) {
-            finishLoad(bundleError ?? new Error(`Unable to load bundle: ${GAME_ART_BUNDLE}`));
-            return;
-          }
-          bundle.loadDir('', SpriteFrame, finishLoad);
-        });
+        void this.loadGameArtBundle()
+          .then((bundle) => bundle.loadDir('thumbnails', SpriteFrame, finishLoad))
+          .catch((error: Error) => finishLoad(error));
         return;
       }
       void this.loadResourcesBundle()
@@ -232,6 +243,128 @@ export class SproutPlaylandApp extends Component {
     });
     this.artDirectoryLoads.set(path, load);
     return load;
+  }
+
+  private loadGameArtBundle(): Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> {
+    const loadedBundle = assetManager.getBundle(GAME_ART_BUNDLE);
+    if (loadedBundle) {
+      return Promise.resolve(loadedBundle);
+    }
+    if (this.gameArtBundleLoad) {
+      return this.gameArtBundleLoad;
+    }
+    this.gameArtBundleLoad = new Promise((resolve, reject) => {
+      assetManager.loadBundle(GAME_ART_BUNDLE, (error, bundle) => {
+        if (error || !bundle) {
+          this.gameArtBundleLoad = null;
+          reject(error ?? new Error(`Unable to load bundle: ${GAME_ART_BUNDLE}`));
+          return;
+        }
+        resolve(bundle);
+      });
+    });
+    return this.gameArtBundleLoad;
+  }
+
+  private loadArtworkSource(artwork: PuzzleArtwork): Promise<void> {
+    if (this.frames.has(artwork.sourceFrame)) {
+      return Promise.resolve();
+    }
+    const activeLoad = this.artworkSourceLoads.get(artwork.sourceFrame);
+    if (activeLoad) {
+      return activeLoad;
+    }
+    const sourcePath = artwork.sourceFrame.startsWith('dino-')
+      ? `dinosaurs/${artwork.sourceFrame}`
+      : artwork.sourceFrame;
+    const load = new Promise<void>((resolve) => {
+      void this.loadGameArtBundle()
+        .then((bundle) => {
+          bundle.load(sourcePath, SpriteFrame, (error, frame) => {
+            this.artworkSourceLoads.delete(artwork.sourceFrame);
+            if (error || !frame) {
+              console.warn(`Unable to load artwork source: ${sourcePath}`, error);
+              resolve();
+              return;
+            }
+            this.frames.set(artwork.sourceFrame, frame);
+            this.loadedArtworkSources.set(artwork.sourceFrame, sourcePath);
+            this.releaseArtworkSources(artwork.sourceFrame);
+            resolve();
+          });
+        })
+        .catch((error: Error) => {
+          this.artworkSourceLoads.delete(artwork.sourceFrame);
+          console.warn(`Unable to load artwork bundle for: ${sourcePath}`, error);
+          resolve();
+        });
+    });
+    this.artworkSourceLoads.set(artwork.sourceFrame, load);
+    return load;
+  }
+
+  private releaseArtworkSources(keepFrame?: string): void {
+    const bundle = assetManager.getBundle(GAME_ART_BUNDLE);
+    for (const [frameName, sourcePath] of this.loadedArtworkSources) {
+      if (frameName === keepFrame) {
+        continue;
+      }
+      this.frames.delete(frameName);
+      this.loadedArtworkSources.delete(frameName);
+      if (bundle) {
+        this.scheduleOnce(() => {
+          // Do not release a source that was selected and loaded again during
+          // the page transition delay.
+          if (this.loadedArtworkSources.get(frameName) !== sourcePath) {
+            bundle.release(sourcePath, SpriteFrame);
+          }
+        }, 0.45);
+      }
+    }
+  }
+
+  private showArtworkLoading(artwork: PuzzleArtwork, screenName: string): void {
+    const root = this.resetScreen(screenName);
+    this.drawFullBackground(root, new Color(242, 236, 218, 255));
+    this.createCircle(root, -615, 300, 160, new Color(224, 239, 198, 105));
+    this.createCircle(root, 610, -330, 190, new Color(255, 220, 162, 72));
+    const preview = this.createUiNode('ArtworkLoadingPreview', root, 0, 30, 210, 210);
+    if (this.frames.has(artwork.thumbnailFrame)) {
+      this.createCoverImage(preview, artwork.thumbnailFrame, 0, 0, 190, 190, 42);
+    } else {
+      this.createPanel(preview, 'ArtworkLoadingFallback', 0, 0, 190, 190, artwork.fallbackColor, 42);
+    }
+    tween(preview)
+      .repeatForever(
+        tween<Node>()
+          .to(0.7, { scale: new Vec3(1.04, 1.04, 1) }, { easing: 'sineInOut' })
+          .to(0.7, { scale: Vec3.ONE }, { easing: 'sineInOut' }),
+      )
+      .start();
+    for (let index = 0; index < 3; index++) {
+      const dot = this.createCircle(
+        root,
+        (index - 1) * 34,
+        -112,
+        7,
+        index === 0
+          ? new Color(111, 169, 126, 255)
+          : index === 1
+            ? new Color(239, 187, 75, 255)
+            : new Color(121, 190, 230, 255),
+      );
+      const opacity = dot.addComponent(UIOpacity);
+      opacity.opacity = 105;
+      tween(opacity)
+        .delay(index * 0.16)
+        .repeatForever(
+          tween<UIOpacity>()
+            .to(0.38, { opacity: 255 }, { easing: 'quadOut' })
+            .to(0.48, { opacity: 105 }, { easing: 'quadIn' })
+            .delay(0.32),
+        )
+        .start();
+    }
   }
 
   private loadResourcesBundle(): Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> {
@@ -746,8 +879,14 @@ export class SproutPlaylandApp extends Component {
    * 首页资源不受影响；横图、竖图会在预览和拼图区域中等比居中裁切。
    */
   public useCustomPuzzlePhoto(frame: SpriteFrame, title = '我的照片'): void {
+    this.releaseCustomPuzzlePhoto();
     const frameName = `custom-puzzle-${this.customPuzzleSequence++}`;
+    this.customPuzzleFrameName = frameName;
     this.frames.set(frameName, frame);
+    this.openCustomPuzzlePhoto(frameName, title);
+  }
+
+  private openCustomPuzzlePhoto(frameName: string, title = '我的照片'): void {
     this.activePuzzleArtwork = {
       id: frameName,
       title,
@@ -756,6 +895,326 @@ export class SproutPlaylandApp extends Component {
       fallbackColor: new Color(246, 229, 194, 255),
     };
     this.showGameDetail('puzzle', -1, title, true);
+  }
+
+  private openSavedCustomPuzzlePhoto(): void {
+    const frameName = this.customPuzzleFrameName;
+    if (!frameName || !this.frames.has(frameName)) {
+      this.chooseCustomPuzzlePhoto();
+      return;
+    }
+    this.openCustomPuzzlePhoto(frameName);
+  }
+
+  /**
+   * 打开微信相册选择一张照片。选图后会先压缩再交给 Cocos 解码，
+   * 避免手机原图在移动端占用过多纹理内存。
+   */
+  private chooseCustomPuzzlePhoto(privacyChecked = false): void {
+    const platform = globalThis as unknown as {
+      wx?: {
+        chooseMedia?: (options: Record<string, unknown>) => void;
+        chooseImage?: (options: Record<string, unknown>) => void;
+        compressImage?: (options: Record<string, unknown>) => void;
+        requirePrivacyAuthorize?: (options: Record<string, unknown>) => void;
+        getFileSystemManager?: () => {
+          copyFile: (options: Record<string, unknown>) => void;
+          unlink?: (options: Record<string, unknown>) => void;
+        };
+        env?: { USER_DATA_PATH?: string };
+      };
+    };
+    const wxApi = platform.wx;
+    if (wxApi?.requirePrivacyAuthorize && !privacyChecked) {
+      wxApi.requirePrivacyAuthorize({
+        success: () => this.chooseCustomPuzzlePhoto(true),
+        fail: (error: { errMsg?: string }) => this.handleCustomPhotoPickerFailure(error),
+      });
+      return;
+    }
+    if (wxApi?.chooseMedia) {
+      wxApi.chooseMedia({
+        count: 1,
+        mediaType: ['image'],
+        sourceType: ['album'],
+        sizeType: ['compressed'],
+        success: (result: {
+          tempFiles?: Array<{ tempFilePath?: string; width?: number; height?: number }>;
+        }) => {
+          const selected = result.tempFiles?.[0];
+          const path = selected?.tempFilePath;
+          if (path) {
+            this.prepareAndLoadWechatPhoto(wxApi, path, selected.width, selected.height);
+          }
+        },
+        fail: (error: { errMsg?: string }) => this.handleCustomPhotoPickerFailure(error),
+      });
+      return;
+    }
+    if (wxApi?.chooseImage) {
+      wxApi.chooseImage({
+        count: 1,
+        sourceType: ['album'],
+        sizeType: ['compressed'],
+        success: (result: { tempFilePaths?: string[] }) => {
+          const path = result.tempFilePaths?.[0];
+          if (path) {
+            this.prepareAndLoadWechatPhoto(wxApi, path);
+          }
+        },
+        fail: (error: { errMsg?: string }) => this.handleCustomPhotoPickerFailure(error),
+      });
+      return;
+    }
+    this.chooseCustomPuzzlePhotoInBrowser();
+  }
+
+  private prepareAndLoadWechatPhoto(
+    wxApi: {
+      compressImage?: (options: Record<string, unknown>) => void;
+      getFileSystemManager?: () => {
+        copyFile: (options: Record<string, unknown>) => void;
+        unlink?: (options: Record<string, unknown>) => void;
+      };
+      env?: { USER_DATA_PATH?: string };
+    },
+    path: string,
+    width?: number,
+    height?: number,
+  ): void {
+    const openPhoto = (photoPath: string): void => {
+      void this.persistWechatCustomPuzzlePhoto(wxApi, photoPath)
+        .then((persistentPath) => this.loadCustomPuzzlePhoto(persistentPath));
+    };
+    if (!wxApi.compressImage) {
+      openPhoto(path);
+      return;
+    }
+    const options: Record<string, unknown> = {
+      src: path,
+      quality: 82,
+      success: (result: { tempFilePath?: string }) => openPhoto(result.tempFilePath || path),
+      // 部分旧版微信不支持指定尺寸，仍可使用 chooseMedia 的压缩图。
+      fail: () => openPhoto(path),
+    };
+    if (width && height && Math.max(width, height) > 1536) {
+      // 只指定长边，让微信按原始宽高比等比缩放。
+      options[width >= height ? 'compressedWidth' : 'compressedHeight'] = 1536;
+    }
+    wxApi.compressImage(options);
+  }
+
+  private persistWechatCustomPuzzlePhoto(
+    wxApi: {
+      getFileSystemManager?: () => {
+        copyFile: (options: Record<string, unknown>) => void;
+        unlink?: (options: Record<string, unknown>) => void;
+      };
+      env?: { USER_DATA_PATH?: string };
+    },
+    sourcePath: string,
+  ): Promise<string> {
+    const userDataPath = wxApi.env?.USER_DATA_PATH;
+    const fileSystem = wxApi.getFileSystemManager?.();
+    if (!userDataPath || !fileSystem) {
+      return Promise.resolve(sourcePath);
+    }
+    const extension = this.getImagePathExtension(sourcePath);
+    const destinationPath = `${userDataPath}/sprout-playland-custom-puzzle-${Date.now()}${extension}`;
+    let previousPath: string | null = null;
+    try {
+      previousPath = sys.localStorage.getItem(CUSTOM_PUZZLE_PHOTO_STORAGE_KEY);
+    } catch {
+      // 本地存储不可用时仍可在当前会话使用照片。
+    }
+    return new Promise<string>((resolve) => {
+      fileSystem.copyFile({
+        srcPath: sourcePath,
+        destPath: destinationPath,
+        success: () => {
+          let indexSaved = false;
+          try {
+            sys.localStorage.setItem(CUSTOM_PUZZLE_PHOTO_STORAGE_KEY, destinationPath);
+            indexSaved = true;
+          } catch {
+            // 文件已保存，仅索引写入失败。
+          }
+          if (indexSaved && previousPath && previousPath !== destinationPath) {
+            fileSystem.unlink?.({ filePath: previousPath, fail: () => undefined });
+          }
+          resolve(destinationPath);
+        },
+        fail: (error: unknown) => {
+          console.warn('[Puzzle] Unable to persist the selected photo.', error);
+          resolve(sourcePath);
+        },
+      });
+    });
+  }
+
+  private handleCustomPhotoPickerFailure(error: { errMsg?: string }): void {
+    if (!error.errMsg?.includes('cancel')) {
+      console.warn('[Puzzle] Unable to choose a custom photo.', error);
+    }
+  }
+
+  private chooseCustomPuzzlePhotoInBrowser(): void {
+    if (typeof document === 'undefined') {
+      console.warn('[Puzzle] The current platform does not provide an image picker.');
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (!file) {
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      this.loadCustomPuzzlePhoto(url, () => URL.revokeObjectURL(url));
+    };
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  private loadCustomPuzzlePhoto(path: string, cleanup?: () => void): void {
+    const operationSequence = ++this.customPhotoOperationSequence;
+    const navigationSequence = ++this.navigationSequence;
+    this.puzzleSelectPage.showLoading();
+    this.decodeCustomPuzzlePhoto(path, (error, assets) => {
+      cleanup?.();
+      if (error || !assets) {
+        console.warn('[Puzzle] Unable to load the selected photo.', error);
+        if (navigationSequence === this.navigationSequence) {
+          this.puzzleSelectPage.show();
+        }
+        return;
+      }
+      if (
+        navigationSequence !== this.navigationSequence
+        || operationSequence !== this.customPhotoOperationSequence
+      ) {
+        this.destroyCustomPuzzleAssets(assets.frame, assets.texture, assets.image);
+        return;
+      }
+      const frameName = this.installOwnedCustomPuzzlePhoto(assets);
+      this.openCustomPuzzlePhoto(frameName);
+    });
+  }
+
+  private restoreSavedCustomPuzzlePhoto(): Promise<void> {
+    const platform = globalThis as unknown as {
+      wx?: { getFileSystemManager?: () => unknown };
+    };
+    if (!platform.wx?.getFileSystemManager) {
+      return Promise.resolve();
+    }
+    let path: string | null = null;
+    try {
+      path = sys.localStorage.getItem(CUSTOM_PUZZLE_PHOTO_STORAGE_KEY);
+    } catch {
+      return Promise.resolve();
+    }
+    if (!path) {
+      return Promise.resolve();
+    }
+    const operationSequence = this.customPhotoOperationSequence;
+    return new Promise<void>((resolve) => {
+      this.decodeCustomPuzzlePhoto(path!, (error, assets) => {
+        if (error || !assets) {
+          try {
+            sys.localStorage.removeItem(CUSTOM_PUZZLE_PHOTO_STORAGE_KEY);
+          } catch {
+            // 忽略无法清理的失效索引。
+          }
+          resolve();
+          return;
+        }
+        if (operationSequence !== this.customPhotoOperationSequence) {
+          this.destroyCustomPuzzleAssets(assets.frame, assets.texture, assets.image);
+          resolve();
+          return;
+        }
+        this.installOwnedCustomPuzzlePhoto(assets);
+        if (this.contentRoot?.name === 'PuzzleSelect') {
+          this.puzzleSelectPage.show();
+        }
+        resolve();
+      });
+    });
+  }
+
+  private decodeCustomPuzzlePhoto(
+    path: string,
+    done: (
+      error: Error | null,
+      assets?: { frame: SpriteFrame; texture: Texture2D; image: ImageAsset },
+    ) => void,
+  ): void {
+    assetManager.loadRemote<ImageAsset>(path, { ext: this.getImagePathExtension(path) }, (error, image) => {
+      if (error || !image) {
+        done(error ?? new Error('Selected photo did not produce an image asset.'));
+        return;
+      }
+      const texture = new Texture2D();
+      texture.image = image;
+      const frame = new SpriteFrame();
+      frame.texture = texture;
+      frame.name = `custom-puzzle-photo-${this.customPuzzleSequence}`;
+      done(null, { frame, texture, image });
+    });
+  }
+
+  private installOwnedCustomPuzzlePhoto(
+    assets: { frame: SpriteFrame; texture: Texture2D; image: ImageAsset },
+  ): string {
+    this.releaseCustomPuzzlePhoto();
+    const frameName = `custom-puzzle-${this.customPuzzleSequence++}`;
+    this.customPuzzleFrameName = frameName;
+    this.frames.set(frameName, assets.frame);
+    this.ownedCustomPuzzleFrame = assets.frame;
+    this.ownedCustomPuzzleTexture = assets.texture;
+    this.ownedCustomPuzzleImage = assets.image;
+    return frameName;
+  }
+
+  private getImagePathExtension(path: string): string {
+    const match = path.match(/\.(png|jpe?g|webp)(?:$|[?#])/i);
+    return match ? `.${match[1].toLowerCase()}` : '.jpg';
+  }
+
+  private destroyCustomPuzzleAssets(
+    frame: SpriteFrame,
+    texture: Texture2D,
+    image: ImageAsset,
+  ): void {
+    frame.destroy();
+    texture.destroy();
+    assetManager.releaseAsset(image);
+  }
+
+  private releaseCustomPuzzlePhoto(): void {
+    if (this.customPuzzleFrameName) {
+      this.frames.delete(this.customPuzzleFrameName);
+      this.customPuzzleFrameName = null;
+    }
+    if (
+      this.ownedCustomPuzzleFrame
+      && this.ownedCustomPuzzleTexture
+      && this.ownedCustomPuzzleImage
+    ) {
+      this.destroyCustomPuzzleAssets(
+        this.ownedCustomPuzzleFrame,
+        this.ownedCustomPuzzleTexture,
+        this.ownedCustomPuzzleImage,
+      );
+    }
+    this.ownedCustomPuzzleFrame = null;
+    this.ownedCustomPuzzleTexture = null;
+    this.ownedCustomPuzzleImage = null;
   }
 
   private createSproutMark(parent: Node, x: number, y: number, scale: number): void {

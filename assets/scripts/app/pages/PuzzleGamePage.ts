@@ -30,8 +30,24 @@ export class PuzzleGamePage extends PageController {
   private readonly boardX = -300;
   private readonly boardY = -8;
   private readonly boardWidth = 540;
+  private loadSequence = 0;
 
   show(): void {
+    const loadSequence = ++this.loadSequence;
+    if (!this.frames.has(this.activePuzzleArtwork.sourceFrame)) {
+      this.showArtworkLoading(this.activePuzzleArtwork, 'PuzzleArtworkLoading');
+      void this.loadArtworkSource(this.activePuzzleArtwork).then(() => {
+        if (loadSequence !== this.loadSequence) {
+          return;
+        }
+        if (!this.frames.has(this.activePuzzleArtwork.sourceFrame)) {
+          this.showCategory('puzzle');
+          return;
+        }
+        this.show();
+      });
+      return;
+    }
     const root = this.resetScreen('Puzzle');
     this.drawFullBackground(root, new Color(247, 207, 154, 255));
     for (let y = -330; y <= 330; y += 62) {

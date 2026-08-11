@@ -69,13 +69,15 @@ function New-ImageMeta([System.IO.FileInfo]$Image) {
         }
         ver = '1.0.12'; imported = $true; files = @('.json'); subMetas = @{}
     }
+    $extension = $Image.Extension.ToLowerInvariant()
+    $hasAlpha = $extension -eq '.png'
     $meta = [ordered]@{
         ver = '1.0.27'; importer = 'image'; imported = $true; uuid = $uuid
-        files = @('.json', '.png')
+        files = @($extension, '.json')
         subMetas = [ordered]@{ '6c48a' = $textureMeta; 'f9941' = $spriteMeta }
         userData = [ordered]@{
             type = 'sprite-frame'; fixAlphaTransparencyArtifacts = $false
-            hasAlpha = $true; redirect = $textureUuid
+            hasAlpha = $hasAlpha; redirect = $textureUuid
         }
     }
     $meta | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $metaPath -Encoding utf8
@@ -85,5 +87,7 @@ foreach ($directory in $Directories) {
     $resolved = (Resolve-Path -LiteralPath $directory).Path
     New-DirectoryMeta $resolved
     New-DirectoryMeta (Split-Path -Parent $resolved)
-    Get-ChildItem -LiteralPath $resolved -Filter '*.png' -File | ForEach-Object { New-ImageMeta $_ }
+    Get-ChildItem -LiteralPath $resolved -File |
+        Where-Object { $_.Extension -in @('.png', '.jpg', '.jpeg', '.webp') } |
+        ForEach-Object { New-ImageMeta $_ }
 }

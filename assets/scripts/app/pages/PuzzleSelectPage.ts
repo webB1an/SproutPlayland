@@ -69,7 +69,12 @@ export class PuzzleSelectPage extends PageController {
     const cardWidth = 220;
     const columnStep = 246;
     const rowStep = 282;
-    const columns = Math.ceil(artworks.length / 2);
+    const hasSavedPhoto = Boolean(
+      this.customPuzzleFrameName && this.frames.has(this.customPuzzleFrameName),
+    );
+    const customItemCount = hasSavedPhoto ? 2 : 1;
+    const itemCount = artworks.length + customItemCount;
+    const columns = Math.ceil(itemCount / 2);
     const contentWidth = cardWidth + (columns - 1) * columnStep;
     const viewportWidth = Math.max(720, this.visibleWidth - 140);
     const viewportHeight = 600;
@@ -111,9 +116,16 @@ export class PuzzleSelectPage extends PageController {
       viewportHeight,
     );
     const topRowY = 122;
+    if (hasSavedPhoto) {
+      this.createSavedCustomPhotoCard(content, 0, topRowY, this.customPuzzleFrameName);
+      this.createCustomPhotoCard(content, columnStep, topRowY);
+    } else {
+      this.createCustomPhotoCard(content, 0, topRowY);
+    }
     artworks.forEach((artwork, index) => {
-      const column = index % columns;
-      const row = index < columns ? 0 : 1;
+      const itemIndex = index + customItemCount;
+      const column = itemIndex % columns;
+      const row = itemIndex < columns ? 0 : 1;
       this.createArtworkCard(
         content,
         artwork,
@@ -129,6 +141,104 @@ export class PuzzleSelectPage extends PageController {
       minOffset,
       columnStep,
     );
+  }
+
+  private createSavedCustomPhotoCard(
+    parent: Node,
+    x: number,
+    y: number,
+    frameName: string,
+  ): void {
+    this.createPanel(
+      parent,
+      'SavedPhotoCardShadow',
+      x + 4,
+      y - 9,
+      220,
+      260,
+      new Color(65, 134, 161, 30),
+      24,
+    );
+    const card = this.createPanel(
+      parent,
+      'SavedPhotoCard',
+      x,
+      y,
+      220,
+      260,
+      new Color(255, 255, 250, 255),
+      24,
+      new Color(255, 255, 255, 235),
+      3,
+    );
+    this.createPanel(
+      card,
+      'SavedPhotoMat',
+      0,
+      20,
+      196,
+      196,
+      new Color(221, 241, 240, 255),
+      18,
+    );
+    this.createCoverImage(card, frameName, 0, 20, 188, 188, 16);
+    const playBadge = this.createCircle(card, 0, -104, 27, new Color(103, 177, 111, 255));
+    this.createTriangle(playBadge, 3, 0, 18, 22, Color.WHITE).angle = -90;
+    this.makeCardButton(card, () => this.openSavedCustomPuzzlePhoto());
+  }
+
+  private createCustomPhotoCard(parent: Node, x: number, y: number): void {
+    const cardWidth = 220;
+    const cardHeight = 260;
+    const imageSize = 188;
+    const imageY = 20;
+    this.createPanel(
+      parent,
+      'CustomPhotoCardShadow',
+      x + 4,
+      y - 9,
+      cardWidth,
+      cardHeight,
+      new Color(65, 134, 161, 30),
+      24,
+    );
+    const card = this.createPanel(
+      parent,
+      'CustomPhotoCard',
+      x,
+      y,
+      cardWidth,
+      cardHeight,
+      new Color(255, 255, 250, 255),
+      24,
+      new Color(255, 255, 255, 235),
+      3,
+    );
+    const photo = this.createPanel(
+      card,
+      'CustomPhotoMat',
+      0,
+      imageY,
+      imageSize,
+      imageSize,
+      new Color(210, 239, 249, 255),
+      18,
+    );
+    this.createCircle(photo, 48, 48, 18, new Color(255, 199, 70, 255));
+    const landscape = this.createUiNode('PhotoLandscape', photo, 0, -18, 150, 92);
+    const graphics = landscape.addComponent(Graphics);
+    graphics.fillColor = new Color(102, 184, 133, 255);
+    graphics.moveTo(-75, -46);
+    graphics.lineTo(-27, 20);
+    graphics.lineTo(2, -8);
+    graphics.lineTo(34, 36);
+    graphics.lineTo(75, -46);
+    graphics.close();
+    graphics.fill();
+    const plusBadge = this.createCircle(card, 0, -104, 27, new Color(77, 170, 211, 255));
+    this.createPanel(plusBadge, 'PlusHorizontal', 0, 0, 27, 7, Color.WHITE, 4);
+    this.createPanel(plusBadge, 'PlusVertical', 0, 0, 7, 27, Color.WHITE, 4);
+    this.makeCardButton(card, () => this.chooseCustomPuzzlePhoto());
   }
 
   private createArtworkCard(

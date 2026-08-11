@@ -62,11 +62,11 @@ export class PuzzleDetailPage extends PageController {
     );
     if (
       category === 'puzzle'
-      && this.frames.has(this.activePuzzleArtwork.sourceFrame)
+      && this.frames.has(this.activePuzzleArtwork.thumbnailFrame)
     ) {
       this.createCoverImage(
         previewBoard,
-        this.activePuzzleArtwork.sourceFrame,
+        this.activePuzzleArtwork.thumbnailFrame,
         0,
         0,
         previewSize,

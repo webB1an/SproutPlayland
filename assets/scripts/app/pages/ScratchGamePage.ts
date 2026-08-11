@@ -84,6 +84,20 @@ export class ScratchGamePage extends PageController {
       this.onExit();
       return;
     }
+    if (!this.frames.has(artwork.sourceFrame)) {
+      this.showArtworkLoading(artwork, 'ScratchArtworkLoading');
+      void this.loadArtworkSource(artwork).then(() => {
+        if (runId !== this.runId) {
+          return;
+        }
+        if (!this.frames.has(artwork.sourceFrame)) {
+          this.onExit();
+          return;
+        }
+        this.show(levelIndex, difficulty);
+      });
+      return;
+    }
     const definition = getMiniGameDefinition('scratch');
     const accent = toColor(definition.palette.accent);
     const root = this.resetScreen('ScratchGame');
