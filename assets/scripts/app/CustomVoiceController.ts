@@ -95,6 +95,7 @@ export class CustomVoiceController {
     this.stopPlayback();
 
     if (this.wechatRecorder) {
+      await this.ensureWechatRecordingPermission();
       this.activeCue = cue;
       await new Promise<void>((resolve, reject) => {
         this.pendingWechatStart = { resolve, reject };
@@ -254,11 +255,104 @@ export class CustomVoiceController {
         .catch((error) => this.finishWechatRecordingWithError(error));
     });
     this.wechatRecorder.onError?.((error: any) => {
-      const message = error?.errMsg || '录音失败';
+      const message = this.getWechatRecordingErrorMessage(error);
       this.pendingWechatStart?.reject(new Error(message));
       this.pendingWechatStart = null;
       this.finishWechatRecordingWithError(new Error(message));
     });
+  }
+
+  private async ensureWechatRecordingPermission(): Promise<void> {
+    if (!this.wechat) {
+      return;
+    }
+
+    await this.ensureWechatPrivacyAuthorization();
+
+    if (!this.wechat.authorize) {
+      return;
+    }
+
+    let permissionState: boolean | undefined;
+    if (this.wechat.getSetting) {
+      try {
+        const setting = await new Promise<any>((resolve, reject) => {
+          this.wechat.getSetting({
+            success: resolve,
+            fail: reject,
+          });
+        });
+        permissionState = setting?.authSetting?.['scope.record'];
+      } catch {
+        // getSetting 失败时仍尝试直接授权，平台会返回更准确的原因。
+      }
+    }
+    if (permissionState === true) {
+      return;
+    }
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.wechat.authorize({
+          scope: 'scope.record',
+          success: () => resolve(),
+          fail: reject,
+        });
+      });
+      return;
+    } catch (authorizeError) {
+      if (permissionState === false && this.wechat.openSetting) {
+        try {
+          const setting = await new Promise<any>((resolve, reject) => {
+            this.wechat.openSetting({
+              success: resolve,
+              fail: reject,
+            });
+          });
+          if (setting?.authSetting?.['scope.record'] === true) {
+            return;
+          }
+        } catch {
+          // 继续使用 authorize 的原始错误生成用户可理解的提示。
+        }
+      }
+      throw new Error(this.getWechatRecordingErrorMessage(authorizeError));
+    }
+  }
+
+  private async ensureWechatPrivacyAuthorization(): Promise<void> {
+    if (!this.wechat?.requirePrivacyAuthorize) {
+      return;
+    }
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.wechat.requirePrivacyAuthorize({
+          success: () => resolve(),
+          fail: reject,
+        });
+      });
+    } catch (privacyError) {
+      const detail = String((privacyError as any)?.errMsg || (privacyError as any)?.message || '').toLowerCase();
+      if (detail.includes('deny') || detail.includes('disagree') || detail.includes('cancel')) {
+        throw new Error('需要同意隐私保护指引后才能录音');
+      }
+      throw new Error((privacyError as any)?.errMsg || (privacyError as any)?.message || '隐私保护提示打开失败，请稍后重试');
+    }
+  }
+
+  private getWechatRecordingErrorMessage(error: any): string {
+    const detail = String(error?.errMsg || error?.message || '').toLowerCase();
+    if (detail.includes('privacy')) {
+      return '需要先同意隐私保护提示，才能使用麦克风';
+    }
+    if (detail.includes('deny') || detail.includes('denied') || detail.includes('auth')) {
+      return '麦克风权限未开启，请在小游戏右上角菜单的设置中开启';
+    }
+    if (detail.includes('devtools') || detail.includes('not support')) {
+      return '开发者工具不支持录音，请使用微信真机预览';
+    }
+    return error?.errMsg || error?.message || '麦克风启动失败，请稍后重试';
   }
 
   private finishWechatRecordingWithError(error: Error): void {

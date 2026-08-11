@@ -1,5 +1,6 @@
 import {
   _decorator,
+  assetManager,
   Color,
   Component,
   EventTouch,
@@ -10,11 +11,11 @@ import {
   Mask,
   Node,
   ResolutionPolicy,
-  resources,
   Sprite,
   SpriteFrame,
   sys,
   tween,
+  UIOpacity,
   UITransform,
   Vec3,
   VerticalTextAlignment,
@@ -46,11 +47,17 @@ import type {
 
 const { ccclass } = _decorator;
 
+const GAME_ART_BUNDLE = 'dino-art';
+const GAME_ART_DIRECTORY = 'art/games/puzzle';
+
 @ccclass('SproutPlaylandApp')
 export class SproutPlaylandApp extends Component {
   private readonly designWidth = DESIGN_WIDTH;
   private readonly designHeight = DESIGN_HEIGHT;
   private visibleWidth = DESIGN_WIDTH;
+  private visibleHeight = DESIGN_HEIGHT;
+  private resourcesBundleLoad: Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> | null = null;
+  private fixedWidthLayout = false;
   private contentRoot: Node | null = null;
   private pieces: PuzzlePieceState[] = [];
   private completed = false;
@@ -124,19 +131,25 @@ export class SproutPlaylandApp extends Component {
     });
     this.loadPuzzleStars();
     view.resizeWithBrowserSize(true);
-    view.setDesignResolutionSize(
-      this.designWidth,
-      this.designHeight,
-      ResolutionPolicy.FIXED_HEIGHT,
-    );
-    this.visibleWidth = Math.max(this.designWidth, view.getVisibleSize().width);
+    this.applyResponsiveResolutionPolicy(true);
+    const visibleSize = view.getVisibleSize();
+    this.visibleWidth = Math.max(this.designWidth, visibleSize.width);
+    this.visibleHeight = Math.max(this.designHeight, visibleSize.height);
     view.on('canvas-resize', this.handleCanvasResize, this);
 
+    // Do not keep the first frame black while remote artwork is downloading.
+    // Render the lightweight fallback home immediately, then refresh it after
+    // the remote resources bundle becomes available.
+    this.showHome();
     void Promise.all([
       this.loadArtDirectory('art/common/home'),
       this.loadArtDirectory('art/common/ui-generated'),
       this.loadArtDirectory('art/games/puzzle/ui'),
-    ]).then(() => this.showHome());
+    ]).then(() => {
+      if (this.contentRoot?.name === 'Home') {
+        this.showHome();
+      }
+    });
   }
 
   onDestroy(): void {
@@ -189,7 +202,7 @@ export class SproutPlaylandApp extends Component {
       return activeLoad;
     }
     const load = new Promise<void>((resolve) => {
-      resources.loadDir(path, SpriteFrame, (error, frames) => {
+      const finishLoad = (error: Error | null, frames: SpriteFrame[] = []) => {
         this.artDirectoryLoads.delete(path);
         if (error) {
           console.warn(`Unable to load art directory: ${path}`, error);
@@ -201,10 +214,44 @@ export class SproutPlaylandApp extends Component {
         }
         this.loadedArtDirectories.add(path);
         resolve();
-      });
+      };
+      if (path === GAME_ART_DIRECTORY) {
+        assetManager.loadBundle(GAME_ART_BUNDLE, (bundleError, bundle) => {
+          if (bundleError || !bundle) {
+            finishLoad(bundleError ?? new Error(`Unable to load bundle: ${GAME_ART_BUNDLE}`));
+            return;
+          }
+          bundle.loadDir('', SpriteFrame, finishLoad);
+        });
+        return;
+      }
+      void this.loadResourcesBundle()
+        .then((bundle) => bundle.loadDir(path, SpriteFrame, finishLoad))
+        .catch((error: Error) => finishLoad(error));
     });
     this.artDirectoryLoads.set(path, load);
     return load;
+  }
+
+  private loadResourcesBundle(): Promise<NonNullable<ReturnType<typeof assetManager.getBundle>>> {
+    const loadedBundle = assetManager.getBundle('resources');
+    if (loadedBundle) {
+      return Promise.resolve(loadedBundle);
+    }
+    if (this.resourcesBundleLoad) {
+      return this.resourcesBundleLoad;
+    }
+    this.resourcesBundleLoad = new Promise((resolve, reject) => {
+      assetManager.loadBundle('resources', (error, bundle) => {
+        if (error || !bundle) {
+          this.resourcesBundleLoad = null;
+          reject(error ?? new Error('Unable to load resources bundle'));
+          return;
+        }
+        resolve(bundle);
+      });
+    });
+    return this.resourcesBundleLoad;
   }
 
   private createHexagonMark(
@@ -371,6 +418,16 @@ export class SproutPlaylandApp extends Component {
     };
   }
 
+  private getSafeBottomLeftPosition(width: number, height: number): { x: number; y: number } {
+    const visibleSize = view.getVisibleSize();
+    const safeArea = sys.getSafeAreaRect(false);
+    const margin = 20;
+    return {
+      x: -visibleSize.width / 2 + safeArea.x + margin + width / 2,
+      y: -visibleSize.height / 2 + safeArea.y + margin + height / 2,
+    };
+  }
+
   private getStarsForPieceCount(): number {
     if (this.selectedPieceCount === 16) {
       return 3;
@@ -431,45 +488,68 @@ export class SproutPlaylandApp extends Component {
   }
 
   private resetScreen(name: string): Node {
-    if (this.contentRoot?.isValid) {
-      this.contentRoot.destroy();
-    }
+    const previousRoot = this.contentRoot;
     const root = new Node(name);
     root.layer = Layers.Enum.UI_2D;
-    root.addComponent(UITransform).setContentSize(this.visibleWidth, this.designHeight);
+    root.addComponent(UITransform).setContentSize(this.visibleWidth, this.visibleHeight);
     root.setPosition(Vec3.ZERO);
     this.node.addChild(root);
     this.contentRoot = root;
+    // 页面切换过渡：新页面淡入并轻微上浮；旧页面留在下方，过渡结束后销毁。
+    const transitionOpacity = root.addComponent(UIOpacity);
+    transitionOpacity.opacity = 0;
+    root.setPosition(0, -12, 0);
+    tween(transitionOpacity)
+      .to(0.2, { opacity: 255 }, { easing: 'quadOut' })
+      .start();
+    tween(root)
+      .to(0.24, { position: Vec3.ZERO }, { easing: 'quadOut' })
+      .start();
+    if (previousRoot?.isValid) {
+      const staleRoot = previousRoot;
+      this.scheduleOnce(() => {
+        if (staleRoot.isValid) {
+          staleRoot.destroy();
+        }
+      }, 0.3);
+    }
     return root;
   }
 
   private drawFullBackground(parent: Node, color: Color): void {
-    this.createPanel(parent, 'Background', 0, 0, this.visibleWidth, this.designHeight, color, 0);
+    this.createPanel(parent, 'Background', 0, 0, this.visibleWidth, this.visibleHeight, color, 0);
   }
 
   private readonly handleCanvasResize = (): void => {
-    const nextWidth = Math.max(this.designWidth, view.getVisibleSize().width);
-    if (Math.abs(nextWidth - this.visibleWidth) < 0.5) {
+    this.applyResponsiveResolutionPolicy();
+    const visibleSize = view.getVisibleSize();
+    const nextWidth = Math.max(this.designWidth, visibleSize.width);
+    const nextHeight = Math.max(this.designHeight, visibleSize.height);
+    if (
+      Math.abs(nextWidth - this.visibleWidth) < 0.5
+      && Math.abs(nextHeight - this.visibleHeight) < 0.5
+    ) {
       return;
     }
     this.visibleWidth = nextWidth;
+    this.visibleHeight = nextHeight;
     if (!this.contentRoot?.isValid) {
       return;
     }
     this.contentRoot.getComponent(UITransform)?.setContentSize(
       this.visibleWidth,
-      this.designHeight,
+      this.visibleHeight,
     );
     this.resizeFlatPanel(
       this.contentRoot.getChildByName('Background'),
       this.visibleWidth,
-      this.designHeight,
+      this.visibleHeight,
       0,
     );
     const pinkSide = this.contentRoot.getChildByName('PinkSide');
     if (pinkSide) {
       pinkSide.setPosition(this.visibleWidth / 4, 0);
-      this.resizeFlatPanel(pinkSide, this.visibleWidth / 2, this.designHeight, 0);
+      this.resizeFlatPanel(pinkSide, this.visibleWidth / 2, this.visibleHeight, 0);
     }
     this.contentRoot.children
       .filter((child) => child.name === 'WoodLine')
@@ -479,7 +559,7 @@ export class SproutPlaylandApp extends Component {
     this.contentRoot.getChildByName('BackDepth')?.setPosition(backPosition.x, backPosition.y - 4);
     const helpPosition = this.getSafeTopRightPosition(76, 76);
     this.contentRoot.getChildByName('HelpButton')?.setPosition(helpPosition.x, helpPosition.y);
-    const voicePosition = this.getSafeTopRightPosition(66, 66);
+    const voicePosition = this.getSafeBottomLeftPosition(66, 66);
     this.contentRoot
       .getChildByName('VoiceSettingsButton')
       ?.setPosition(voicePosition.x, voicePosition.y);
@@ -487,6 +567,27 @@ export class SproutPlaylandApp extends Component {
       .getChildByName('VoiceSettingsDepth')
       ?.setPosition(voicePosition.x, voicePosition.y - 4);
   };
+
+  /**
+   * 16:9 手机按高度扩展左右空间；4:3 Pad 按宽度扩展上下空间。
+   * 这样核心 1334x750 游戏区域始终完整可见，不会因窄屏比例裁掉左右内容。
+   */
+  private applyResponsiveResolutionPolicy(force = false): void {
+    const frameSize = view.getFrameSize();
+    const frameRatio = frameSize.height > 0
+      ? frameSize.width / frameSize.height
+      : this.designWidth / this.designHeight;
+    const shouldFixWidth = frameRatio < this.designWidth / this.designHeight;
+    if (!force && shouldFixWidth === this.fixedWidthLayout) {
+      return;
+    }
+    this.fixedWidthLayout = shouldFixWidth;
+    view.setDesignResolutionSize(
+      this.designWidth,
+      this.designHeight,
+      shouldFixWidth ? ResolutionPolicy.FIXED_WIDTH : ResolutionPolicy.FIXED_HEIGHT,
+    );
+  }
 
   private resizeFlatPanel(
     node: Node | null,
@@ -835,12 +936,12 @@ export class SproutPlaylandApp extends Component {
 
   private makeButton(node: Node, action: () => void): void {
     node.on(Node.EventType.TOUCH_START, () => {
-      tween(node).stop().to(0.07, { scale: new Vec3(0.96, 0.96, 1) }).start();
+      tween(node).stop().to(0.07, { scale: new Vec3(0.94, 0.94, 1) }).start();
     });
     node.on(Node.EventType.TOUCH_END, () => {
       tween(node)
         .stop()
-        .to(0.09, { scale: Vec3.ONE })
+        .to(0.14, { scale: Vec3.ONE }, { easing: 'backOut' })
         .call(() => {
           this.gameAudio?.play('tap');
           action();
@@ -848,7 +949,7 @@ export class SproutPlaylandApp extends Component {
         .start();
     });
     node.on(Node.EventType.TOUCH_CANCEL, () => {
-      tween(node).stop().to(0.09, { scale: Vec3.ONE }).start();
+      tween(node).stop().to(0.14, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
     });
   }
 

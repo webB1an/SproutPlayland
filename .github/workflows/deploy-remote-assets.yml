@@ -1,0 +1,69 @@
+name: Deploy remote game assets
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: sprout-playland-remote-assets
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate prepared remote bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bundle in dino-art resources; do
+            test -d "deploy/remote/$bundle"
+            compgen -G "deploy/remote/$bundle/config*.json" >/dev/null
+          done
+
+      - name: Prepare SSH key and archives
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY" || { echo 'Missing GitHub secret: DEPLOY_SSH_KEY' >&2; exit 1; }
+          key_path="$RUNNER_TEMP/sprout-playland-deploy-key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > "$key_path"
+          chmod 600 "$key_path"
+          echo "DEPLOY_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/sprout-playland-remote"
+          tar -czf "$RUNNER_TEMP/sprout-playland-remote/dino-art.tar.gz" -C deploy/remote dino-art
+          tar -czf "$RUNNER_TEMP/sprout-playland-remote/resources.tar.gz" -C deploy/remote resources
+
+      - name: Deploy remote bundles
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" || { echo 'Missing GitHub secret: DEPLOY_HOST' >&2; exit 1; }
+          test -n "$DEPLOY_USER" || { echo 'Missing GitHub secret: DEPLOY_USER' >&2; exit 1; }
+          port="${DEPLOY_PORT:-22}"
+          remote_stage="/tmp/sprout-playland-$GITHUB_RUN_ID"
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          ssh_options=(-p "$port" -i "$DEPLOY_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+          scp_options=(-P "$port" -i "$DEPLOY_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+
+          ssh "${ssh_options[@]}" "$target" "mkdir -p '$remote_stage'"
+          scp "${scp_options[@]}" \
+            "$RUNNER_TEMP/sprout-playland-remote/dino-art.tar.gz" \
+            "$RUNNER_TEMP/sprout-playland-remote/resources.tar.gz" \
+            tools/deploy-remote-assets.sh \
+            "$target:$remote_stage/"
+          ssh "${ssh_options[@]}" "$target" \
+            "GITHUB_RUN_ID='$GITHUB_RUN_ID' bash '$remote_stage/deploy-remote-assets.sh' '/www/wwwroot/sprout-playland-assets.wdbzk.com/remote' '$remote_stage'"

@@ -93,7 +93,7 @@ export const MINI_GAME_DEFINITIONS: Readonly<Record<MiniGameId, MiniGameDefiniti
     ...GAME_CARDS[2],
     id: 'shadow',
     selectTitle: '选一组恐龙来配对',
-    instruction: '把下面的恐龙放到上面一样的图片里',
+    instruction: '把下面的恐龙放到上面一样的恐龙里',
     completionText: '一样的恐龙都配对成功啦！',
   },
   bubble: {
@@ -101,7 +101,7 @@ export const MINI_GAME_DEFINITIONS: Readonly<Record<MiniGameId, MiniGameDefiniti
     id: 'bubble',
     selectTitle: '选一只恐龙开始寻找',
     instruction: '点破装着目标恐龙的泡泡',
-    completionText: '三个目标都找到啦！',
+    completionText: '目标都找到啦！',
   },
   memory: {
     ...GAME_CARDS[4],

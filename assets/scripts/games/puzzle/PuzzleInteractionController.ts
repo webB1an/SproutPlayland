@@ -25,20 +25,94 @@ export class PuzzleInteractionController {
   constructor(private readonly callbacks: PuzzleInteractionCallbacks) {}
 
   bindDragSurface(surface: Node, pieces: PuzzlePieceState[]): void {
-    let activePiece: PuzzlePieceState | null = null;
-    let dragOffset = new Vec3();
-    let lastX = 0;
+    type DragSession = {
+      piece: PuzzlePieceState;
+      dragOffset: Vec3;
+      lastX: number;
+    };
+    // 按触摸点 ID 跟踪拖拽，避免多指（握持手掌、辅助指）劫持唯一的
+    // activePiece，导致拼块被遗弃在正确位置却永远不被标记吸附。
+    const activeDrags = new Map<number, DragSession>();
+    let completionNotified = false;
+
+    const notifyCompletionIfReady = () => {
+      if (
+        completionNotified
+        || this.callbacks.isCompleted()
+        || pieces.length === 0
+        || !pieces.every((piece) => piece.snapped)
+      ) {
+        return;
+      }
+      completionNotified = true;
+      this.callbacks.onAllSnapped();
+    };
+
+    // 统一结算"视觉已在正确位置、逻辑未吸附"的拼块（多指打断、入场
+    // 动画被打断等情况都会留下这种状态），全部就位后只触发一次完成。
+    const settlePlacedPieces = () => {
+      if (completionNotified || this.callbacks.isCompleted()) {
+        return;
+      }
+      let settledAny = false;
+      for (const piece of pieces) {
+        if (piece.snapped) {
+          continue;
+        }
+        if (Vec3.distance(piece.node.position, piece.target) >= piece.snapDistance) {
+          continue;
+        }
+        piece.snapped = true;
+        settledAny = true;
+        this.callbacks.onPieceSnapped?.();
+        tween(piece.node)
+          .stop()
+          .to(
+            0.15,
+            {
+              position: piece.target,
+              scale: Vec3.ONE,
+              angle: 0,
+            },
+            { easing: 'quadOut' },
+          )
+          .start();
+        const shadowOpacity = piece.shadow.getComponent(UIOpacity)!;
+        tween(shadowOpacity)
+          .stop()
+          .to(0.24, { opacity: 0 }, { easing: 'quadIn' })
+          .call(() => {
+            piece.shadow.active = false;
+          })
+          .start();
+      }
+      if (settledAny) {
+        this.refreshConnections(pieces);
+      }
+      notifyCompletionIfReady();
+    };
 
     surface.on(Node.EventType.TOUCH_START, (event: EventTouch) => {
       if (this.callbacks.isCompleted()) {
         return;
       }
+      settlePlacedPieces();
       const position = this.callbacks.touchToRoot(event);
       const piece = this.pickVisiblePiece(position, pieces);
       if (!piece) {
         return;
       }
-      activePiece = piece;
+      for (const session of activeDrags.values()) {
+        if (session.piece === piece) {
+          return;
+        }
+      }
+      const session: DragSession = {
+        piece,
+        dragOffset: new Vec3(),
+        lastX: 0,
+      };
+      activeDrags.set(event.getID(), session);
       this.callbacks.onPiecePickedUp?.();
       piece.node.setPosition(this.constrainToSurface(
         piece,
@@ -47,8 +121,8 @@ export class PuzzleInteractionController {
         piece.restAngle * 0.3,
         1.018,
       ));
-      dragOffset = piece.node.position.clone().subtract(position);
-      lastX = piece.node.position.x;
+      session.dragOffset = piece.node.position.clone().subtract(position);
+      session.lastX = piece.node.position.x;
       piece.node.setSiblingIndex(piece.node.parent!.children.length - 1);
       piece.shadow.active = true;
       piece.depth.active = true;
@@ -78,12 +152,13 @@ export class PuzzleInteractionController {
     });
 
     surface.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
-      const piece = activePiece;
-      if (!piece || piece.snapped || this.callbacks.isCompleted()) {
+      const session = activeDrags.get(event.getID());
+      if (!session || session.piece.snapped || this.callbacks.isCompleted()) {
         return;
       }
-      const position = this.callbacks.touchToRoot(event).add(dragOffset);
-      const deltaX = position.x - lastX;
+      const piece = session.piece;
+      const position = this.callbacks.touchToRoot(event).add(session.dragOffset);
+      const deltaX = position.x - session.lastX;
       const angle = this.clamp(-deltaX * 0.22, -3.5, 3.5);
       piece.node.angle = angle;
       const constrainedPosition = this.constrainToSurface(
@@ -94,13 +169,31 @@ export class PuzzleInteractionController {
         1.018,
       );
       piece.node.setPosition(constrainedPosition);
-      lastX = constrainedPosition.x;
+      session.lastX = constrainedPosition.x;
     });
 
-    const finishDrag = () => {
-      const piece = activePiece;
-      activePiece = null;
-      if (!piece || piece.snapped || this.callbacks.isCompleted()) {
+    const finishDrag = (event: EventTouch) => {
+      const eventId = event.getID();
+      let session = activeDrags.get(eventId);
+      let sessionId = eventId;
+      // 浏览器鼠标模拟和少数设备可能让结束事件拿到不同的触点 ID。
+      // 只有一个活动拖拽时可安全回收该会话，避免拼块停在正确位置却不结算。
+      if (!session && activeDrags.size === 1) {
+        const fallback = activeDrags.entries().next().value as
+          | [number, DragSession]
+          | undefined;
+        if (fallback) {
+          [sessionId, session] = fallback;
+        }
+      }
+      if (!session) {
+        settlePlacedPieces();
+        return;
+      }
+      activeDrags.delete(sessionId);
+      const piece = session.piece;
+      if (piece.snapped || this.callbacks.isCompleted()) {
+        settlePlacedPieces();
         return;
       }
       const distance = Vec3.distance(piece.node.position, piece.target);
@@ -108,6 +201,9 @@ export class PuzzleInteractionController {
         piece.snapped = true;
         this.callbacks.onPieceSnapped?.();
         this.refreshConnections(pieces);
+        // 不把结算依赖在吸附动画回调上；页面切换、掉帧或 tween 被覆盖时
+        // 仍能立刻进入完成流程。
+        notifyCompletionIfReady();
         tween(piece.node)
           .stop()
           .to(
@@ -128,10 +224,7 @@ export class PuzzleInteractionController {
             { easing: 'quadInOut' },
           )
           .call(() => {
-            this.refreshConnections(pieces);
-            if (pieces.every((item) => item.snapped)) {
-              this.callbacks.onAllSnapped();
-            }
+            settlePlacedPieces();
           })
           .start();
         const shadowOpacity = piece.shadow.getComponent(UIOpacity)!;
@@ -183,6 +276,7 @@ export class PuzzleInteractionController {
             },
           )
           .start();
+        settlePlacedPieces();
       }
     };
 

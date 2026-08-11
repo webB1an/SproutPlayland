@@ -1,0 +1,51 @@
+{
+  "__version__": "1.3.9",
+  "name": "小芽智趣岛",
+  "platform": "wechatgame",
+  "buildPath": "project://build",
+  "outputName": "wechatgame",
+  "buildMode": "normal",
+  "debug": false,
+  "sourceMaps": false,
+  "md5Cache": true,
+  "server": "https://sprout-playland-assets.wdbzk.com/",
+  "mainBundleIsRemote": false,
+  "mainBundleCompressionType": "merge_dep",
+  "bundleConfigs": [
+    {
+      "root": "db://assets/resources",
+      "name": "resources",
+      "priority": 8,
+      "compressionType": "merge_all_json",
+      "isRemote": true,
+      "output": true
+    },
+    {
+      "root": "db://assets/game-bundles/dino-art",
+      "name": "dino-art",
+      "priority": 1,
+      "compressionType": "merge_all_json",
+      "isRemote": true,
+      "output": true
+    }
+  ],
+  "startSceneAssetBundle": false,
+  "startScene": "4135c5f3-ac7c-43d7-9f37-fb0b6a8603b2",
+  "scenes": [
+    {
+      "url": "db://assets/scenes/Main.scene",
+      "uuid": "4135c5f3-ac7c-43d7-9f37-fb0b6a8603b2"
+    }
+  ],
+  "overwriteProjectSettings": {
+    "macroConfig": {
+      "cleanupImageCache": "on"
+    },
+    "includeModules": {
+      "physics": "inherit-project-setting",
+      "physics-2d": "inherit-project-setting",
+      "gfx-webgl2": "off"
+    }
+  },
+  "packages": {}
+}

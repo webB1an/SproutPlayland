@@ -58,8 +58,6 @@ export class PuzzleSelectPage extends PageController {
     this.createCircle(root, 620, 320, 145, new Color(255, 221, 160, 66));
     this.createCircle(root, -640, -340, 180, new Color(205, 232, 218, 70));
     this.createBackButton(root, () => this.showHome());
-    this.createLabel(root, '拼图岛', -380, 306, 42, new Color(61, 88, 65, 255), 360, 60);
-    this.createLabel(root, '选一幅喜欢的图', 240, 306, 25, new Color(112, 128, 96, 255), 500, 45);
     this.createArtworkRail(root);
   }
 

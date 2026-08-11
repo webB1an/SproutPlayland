@@ -22,6 +22,8 @@ import type {
   JigsawEdges,
   PuzzlePieceState,
 } from '../../games/puzzle/PuzzleTypes';
+import { GameCompletionModal } from '../GameCompletionModal';
+import type { DifficultyStars } from '../MiniGameShared';
 import { PageController } from '../PageController';
 
 export class PuzzleGamePage extends PageController {
@@ -106,12 +108,14 @@ export class PuzzleGamePage extends PageController {
     }
     const side = Math.sqrt(this.selectedPieceCount);
     const pieceSize = playSize / side;
+    // 托盘间距保持在 1.05 倍以上拼块边长，保证每块至少一半轮廓可见，
+    // 尤其是 16 块时不再大面积互相遮挡。
     const pileSpacing = pieceSize * (
       this.selectedPieceCount === 4
-        ? 0.98
+        ? 1.08
         : this.selectedPieceCount === 9
-          ? 0.88
-          : 0.8
+          ? 1.06
+          : 1.05
     );
     const pileCenterX = 365;
     const pileCenterY = -4;
@@ -126,10 +130,10 @@ export class PuzzleGamePage extends PageController {
       const start = new Vec3(
         pileCenterX
           + (trayColumn - (side - 1) / 2) * pileSpacing
-          + (Math.random() * 0.2 - 0.1) * pieceSize,
+          + (Math.random() * 0.08 - 0.04) * pieceSize,
         pileCenterY
           + ((side - 1) / 2 - trayRow) * pileSpacing
-          + (Math.random() * 0.2 - 0.1) * pieceSize,
+          + (Math.random() * 0.08 - 0.04) * pieceSize,
       );
       const target = new Vec3(
         boardX + (column - (side - 1) / 2) * pieceSize,
@@ -172,14 +176,16 @@ export class PuzzleGamePage extends PageController {
         containsLocalPoint: piece.containsLocalPoint,
       };
       this.pieces.push(state);
-      piece.node.setPosition(target);
-      piece.node.setScale(new Vec3(0.94, 0.94, 1));
+      // 拼块直接生成在托盘位并从下方错峰弹入，不再先放在目标槽上，
+      // 避免入场窗口内触摸打断后拼块停在"视觉正确、逻辑未吸附"的状态。
+      piece.node.setPosition(new Vec3(start.x, start.y - 120));
+      piece.node.setScale(new Vec3(0.4, 0.4, 1));
       tween(piece.node)
         .delay(0.32 + trayIndex * 0.085)
         .to(
-          0.88,
+          0.5,
           { position: start, scale: Vec3.ONE, angle: restAngle },
-          { easing: 'quadInOut' },
+          { easing: 'backOut' },
         )
         .start();
     }
@@ -606,52 +612,31 @@ export class PuzzleGamePage extends PageController {
   }
 
   showCompletion(): void {
-    if (!this.contentRoot || this.contentRoot.getChildByName('Completion')) {
+    const root = this.contentRoot;
+    if (!root || root.getChildByName('Completion')) {
       return;
     }
     this.completed = true;
 
-    this.createPanel(this.contentRoot, 'ModalShadow', 4, -7, 656, 424, new Color(71, 59, 38, 25), 52);
-    const overlay = this.createPanel(
-      this.contentRoot,
-      'Completion',
-      0,
-      0,
-      656,
-      424,
-      new Color(255, 252, 226, 255),
-      52,
-      new Color(244, 187, 73, 255),
-      6,
-    );
-    overlay.setSiblingIndex(this.contentRoot.children.length - 1);
-    overlay.setScale(new Vec3(0.72, 0.72, 1));
-    tween(overlay).to(0.3, { scale: Vec3.ONE }, { easing: 'backOut' }).start();
-
-    const completionStars = this.currentCompletionStars || this.getStarsForPieceCount();
-    this.createPuzzleStarRow(overlay, completionStars, 0, 130, 62, 82);
-    this.createCompletionCheck(overlay, 0, 25);
-
-    const replay = this.createImage(overlay, 'ui-replay', -190, -121, 94, 94);
-    replay.name = 'ReplayButton';
-    this.makeButton(replay, () => this.show());
-
-    const next = this.createImage(overlay, 'ui-next', 0, -121, 94, 94);
-    next.name = 'NextButton';
-    this.makeButton(next, () => {
-      const currentIndex = Math.max(
-        0,
-        this.puzzleArtworks.findIndex((artwork) => artwork.id === this.activePuzzleArtwork.id),
-      );
-      this.activePuzzleArtwork = this.puzzleArtworks[
-        (currentIndex + 1) % this.puzzleArtworks.length
-      ];
-      this.show();
+    const stars = (this.currentCompletionStars
+      || this.getStarsForPieceCount()) as DifficultyStars;
+    // 拼图页在 playCompletionSequence 里已有彩纸演出，弹窗不再重复播放。
+    new GameCompletionModal(this.app).show(root, {
+      stars,
+      confetti: false,
+      onReplay: () => this.show(),
+      onNext: () => {
+        const currentIndex = Math.max(
+          0,
+          this.puzzleArtworks.findIndex((artwork) => artwork.id === this.activePuzzleArtwork.id),
+        );
+        this.activePuzzleArtwork = this.puzzleArtworks[
+          (currentIndex + 1) % this.puzzleArtworks.length
+        ];
+        this.show();
+      },
+      onMenu: () => this.showCategory('puzzle'),
     });
-
-    const home = this.createImage(overlay, 'ui-menu', 190, -121, 94, 94);
-    home.name = 'HomeButton';
-    this.makeButton(home, () => this.showCategory('puzzle'));
   }
 
   private createCompletionConfetti(parent: Node): void {
@@ -661,7 +646,7 @@ export class PuzzleGamePage extends PageController {
       0,
       0,
       this.visibleWidth,
-      this.designHeight,
+      this.visibleHeight,
     );
     layer.setSiblingIndex(parent.children.length - 1);
     const colors = [
@@ -672,7 +657,7 @@ export class PuzzleGamePage extends PageController {
       new Color(157, 102, 226, 255),
       new Color(255, 139, 67, 255),
     ];
-    const bottom = -this.designHeight / 2 - 70;
+    const bottom = -this.visibleHeight / 2 - 70;
 
     for (let index = 0; index < 76; index++) {
       const width = 7 + Math.random() * 9;
@@ -734,69 +719,4 @@ export class PuzzleGamePage extends PageController {
       .start();
   }
 
-  private createCompletionCheck(parent: Node, x: number, y: number): void {
-    this.createCircle(parent, x, y - 4, 48, new Color(153, 194, 118, 90));
-    const medal = this.createCircle(parent, x, y, 47, new Color(202, 235, 174, 255));
-    this.createCircle(medal, 0, 2, 35, new Color(248, 252, 229, 255));
-    const mark = this.createUiNode('CompletionCheck', medal, 0, 1, 54, 48);
-    const graphics = mark.addComponent(Graphics);
-    const color = new Color(75, 166, 86, 255);
-    graphics.strokeColor = color;
-    graphics.lineWidth = 10;
-    graphics.moveTo(-17, 1);
-    graphics.lineTo(-5, -12);
-    graphics.lineTo(19, 15);
-    graphics.stroke();
-    this.createCircle(mark, -17, 1, 5, color);
-    this.createCircle(mark, -5, -12, 5, color);
-    this.createCircle(mark, 19, 15, 5, color);
-  }
-
-  private createNextIcon(parent: Node): void {
-    const badge = this.createCircle(parent, 0, 2, 27, new Color(255, 252, 228, 255));
-    const color = new Color(54, 161, 69, 255);
-    const shaft = this.createPanel(badge, 'NextShaft', -3, 0, 25, 7, color, 4);
-    shaft.angle = 0;
-    const arrow = this.createTriangle(badge, 12, 0, 18, 20, color);
-    arrow.angle = -90;
-  }
-
-  private createGridIcon(parent: Node): void {
-    const badge = this.createCircle(parent, 0, 2, 27, new Color(255, 252, 228, 255));
-    const tileColor = new Color(112, 158, 93, 255);
-    for (let row = 0; row < 2; row++) {
-      for (let column = 0; column < 2; column++) {
-        this.createPanel(
-          badge,
-          'GridTile',
-          (column - 0.5) * 18,
-          (0.5 - row) * 18,
-          13,
-          13,
-          tileColor,
-          4,
-        );
-      }
-    }
-  }
-
-
-  private createPuzzleStarRow(
-    parent: Node,
-    earnedStars: number,
-    x: number,
-    y: number,
-    size: number,
-    gap: number,
-  ): void {
-    for (let index = 0; index < 3; index++) {
-      this.createPuzzleStarMark(
-        parent,
-        x + (index - 1) * gap,
-        y,
-        size,
-        index < earnedStars,
-      );
-    }
-  }
 }

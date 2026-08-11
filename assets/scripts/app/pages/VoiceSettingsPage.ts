@@ -321,8 +321,10 @@ export class VoiceSettingsPage extends PageController {
         }
         await this.customVoice.startRecording(cue);
       }
-    } catch {
-      this.statusMessage = '录音失败，请检查麦克风权限后重试';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      this.statusMessage = message || '录音失败，请检查麦克风权限后重试';
+      console.warn('[VoiceSettings] Recording failed:', error);
     } finally {
       this.busy = false;
       if (this.contentRoot?.name === 'VoiceSettings') {

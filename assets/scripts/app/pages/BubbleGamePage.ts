@@ -7,17 +7,18 @@ import {
 } from 'cc';
 import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
-import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createSeededRandom,
   type DifficultyStars,
+  getArtworksForMiniGame,
   getNextLevelIndex,
   getWrappedArtworks,
   shuffleWithRandom,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
+import { toColor } from '../ui/UiTheme';
 
 export class BubbleGamePage extends PageController {
   private runId = 0;
@@ -37,7 +38,10 @@ export class BubbleGamePage extends PageController {
     this.stageIndex = 0;
     this.stageSequence = 0;
     this.stageLocked = false;
-    const artworks = this.puzzleArtworks as PuzzleArtwork[];
+    const artworks = getArtworksForMiniGame(
+      'bubble',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     const artwork = artworks[levelIndex];
     if (!artwork) {
       this.onExit();
@@ -47,9 +51,9 @@ export class BubbleGamePage extends PageController {
     const targetCount = difficulty === 1 ? 2 : 3;
     this.targetSequence = getWrappedArtworks(artworks, levelIndex, targetCount);
     const definition = getMiniGameDefinition('bubble');
-    const accent = this.toColor(definition.palette.accent);
+    const accent = toColor(definition.palette.accent);
     const root = this.resetScreen('BubbleGame');
-    this.drawFullBackground(root, this.toColor(definition.palette.background));
+    this.drawFullBackground(root, toColor(definition.palette.background));
     this.createCircle(root, -640, -335, 200, new Color(119, 207, 231, 48));
     this.createCircle(root, 625, 330, 165, new Color(255, 255, 255, 118));
     this.createBackButton(root, () => this.leave());
@@ -62,14 +66,6 @@ export class BubbleGamePage extends PageController {
       new Color(57, 93, 109, 255),
       720,
       54,
-    );
-    createMiniGameDifficultyBadge(
-      this.app,
-      root,
-      difficulty,
-      this.visibleWidth / 2 - 110,
-      310,
-      accent,
     );
     this.renderStage(root, levelIndex, difficulty, runId);
   }
@@ -84,11 +80,25 @@ export class BubbleGamePage extends PageController {
       return;
     }
     if (this.stageRoot?.isValid) {
-      this.stageRoot.destroy();
+      // 旧阶段淡出后再销毁，避免瞬间消失的生硬切换。
+      const staleStage = this.stageRoot;
+      const staleOpacity = staleStage.getComponent(UIOpacity)
+        ?? staleStage.addComponent(UIOpacity);
+      tween(staleOpacity)
+        .to(0.16, { opacity: 0 }, { easing: 'quadIn' })
+        .call(() => {
+          if (staleStage.isValid) {
+            staleStage.destroy();
+          }
+        })
+        .start();
     }
     const stageSequence = ++this.stageSequence;
     this.stageLocked = false;
-    const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
+    const allArtworks = getArtworksForMiniGame(
+      'bubble',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     const target = this.targetSequence[this.stageIndex];
     if (!target) {
       this.finishLevel(levelIndex, difficulty);
@@ -116,7 +126,7 @@ export class BubbleGamePage extends PageController {
       620,
     );
     this.stageRoot = stageRoot;
-    this.createTargetPanel(stageRoot, target);
+    const targetPanel = this.createTargetPanel(stageRoot, target);
     this.createStageDots(stageRoot);
 
     const bubbleSize = difficulty === 1 ? 174 : difficulty === 2 ? 160 : 146;
@@ -141,11 +151,12 @@ export class BubbleGamePage extends PageController {
         difficulty,
         runId,
         stageSequence,
+        targetPanel,
       );
     });
   }
 
-  private createTargetPanel(parent: Node, artwork: PuzzleArtwork): void {
+  private createTargetPanel(parent: Node, artwork: PuzzleArtwork): Node {
     this.createPanel(
       parent,
       'BubbleTargetDepth',
@@ -198,6 +209,7 @@ export class BubbleGamePage extends PageController {
       238,
       42,
     );
+    return panel;
   }
 
   private createStageDots(parent: Node): void {
@@ -294,7 +306,13 @@ export class BubbleGamePage extends PageController {
       new Color(255, 255, 255, 190),
     );
     bubble.addComponent(UIOpacity).opacity = 255;
-    this.startFloating(bubble, new Vec3(x, y, 0), index);
+    // 入场：错峰从 0 弹入，随后进入循环漂浮。
+    bubble.setScale(Vec3.ZERO);
+    tween(bubble)
+      .delay(0.08 + index * 0.06)
+      .to(0.32, { scale: Vec3.ONE }, { easing: 'backOut' })
+      .call(() => this.startFloating(bubble, new Vec3(x, y, 0), index))
+      .start();
     return bubble;
   }
 
@@ -308,6 +326,7 @@ export class BubbleGamePage extends PageController {
     difficulty: DifficultyStars,
     runId: number,
     stageSequence: number,
+    targetPanel: Node,
   ): void {
     bubble.on(Node.EventType.TOUCH_START, () => {
       if (
@@ -383,15 +402,22 @@ export class BubbleGamePage extends PageController {
       }
       this.gameAudio?.play('drop');
       void this.customVoice?.play('retry', 2600);
+      tween(targetPanel)
+        .stop()
+        .to(0.14, { scale: new Vec3(1.055, 1.055, 1) }, { easing: 'quadOut' })
+        .to(0.22, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .to(0.14, { scale: new Vec3(1.035, 1.035, 1) }, { easing: 'quadOut' })
+        .to(0.2, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .start();
       tween(bubble)
         .stop()
-        .to(
-          0.07,
-          { position: new Vec3(rest.x - 12, rest.y, 0), scale: Vec3.ONE },
-        )
-        .to(0.07, { position: new Vec3(rest.x + 12, rest.y, 0) })
-        .to(0.07, { position: new Vec3(rest.x - 8, rest.y, 0) })
-        .to(0.09, { position: new Vec3(rest.x, rest.y, 0) })
+        .to(0.08, { position: new Vec3(rest.x - 20, rest.y, 0), scale: Vec3.ONE })
+        .to(0.08, { position: new Vec3(rest.x + 18, rest.y, 0) })
+        .to(0.08, { position: new Vec3(rest.x - 12, rest.y, 0) })
+        .to(0.09, { position: new Vec3(rest.x + 8, rest.y, 0) })
+        .to(0.12, { position: new Vec3(rest.x, rest.y, 0) })
+        .to(0.1, { scale: new Vec3(1.07, 1.07, 1) }, { easing: 'quadOut' })
+        .to(0.12, { scale: Vec3.ONE }, { easing: 'backOut' })
         .call(() => (
           this.startFloating(bubble, new Vec3(rest.x, rest.y, 0), index)
         ))
@@ -474,7 +500,10 @@ export class BubbleGamePage extends PageController {
     levelIndex: number,
     difficulty: DifficultyStars,
   ): void {
-    const artworks = this.puzzleArtworks as PuzzleArtwork[];
+    const artworks = getArtworksForMiniGame(
+      'bubble',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     const artwork = this.activeArtwork;
     if (!artwork) {
       this.onExit();
@@ -499,9 +528,5 @@ export class BubbleGamePage extends PageController {
     this.stageSequence++;
     this.stageLocked = true;
     this.onExit();
-  }
-
-  private toColor(rgb: readonly [number, number, number]): Color {
-    return new Color(rgb[0], rgb[1], rgb[2], 255);
   }
 }

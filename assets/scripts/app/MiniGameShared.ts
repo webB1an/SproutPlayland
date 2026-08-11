@@ -9,8 +9,23 @@ import {
   Vec3,
 } from 'cc';
 import type { PuzzleArtwork } from '../games/puzzle/PuzzleTypes';
+import type { MiniGameId } from './GameRegistry';
 
 export type DifficultyStars = 1 | 2 | 3;
+
+/**
+ * 擦除玩法可以使用完整场景；名称和规则明确指向“恐龙”的玩法只使用恐龙素材。
+ * 选关页与游戏页必须共用此过滤规则，确保关卡索引不会错位。
+ */
+export function getArtworksForMiniGame(
+  gameId: MiniGameId,
+  artworks: readonly PuzzleArtwork[],
+): PuzzleArtwork[] {
+  if (gameId === 'scratch') {
+    return [...artworks];
+  }
+  return artworks.filter((artwork) => artwork.id.startsWith('dino-'));
+}
 
 export function getLevelDifficulty(
   levelIndex: number,
@@ -362,180 +377,5 @@ export class DragMatchController {
         Math.min(surfaceSize.height / 2 - marginY, position.y),
       ),
     );
-  }
-}
-
-export type MiniGameCompletionOptions = {
-  title: string;
-  stars: DifficultyStars;
-  onReplay: () => void;
-  onNext: () => void;
-  onExit: () => void;
-};
-
-/** 四个小游戏共用的完成卡片和庆祝粒子，保证奖励体验一致。 */
-export class MiniGameCelebration {
-  constructor(private readonly app: any) {}
-
-  show(parent: Node, options: MiniGameCompletionOptions): void {
-    const overlay = this.app.createUiNode(
-      'MiniGameCompletion',
-      parent,
-      0,
-      0,
-      this.app.visibleWidth,
-      this.app.designHeight,
-    );
-    this.app.createPanel(
-      overlay,
-      'CompletionShade',
-      0,
-      0,
-      this.app.visibleWidth,
-      this.app.designHeight,
-      new Color(44, 57, 62, 142),
-      0,
-    );
-    this.createConfetti(overlay);
-
-    this.app.createPanel(
-      overlay,
-      'CompletionCardDepth',
-      4,
-      -10,
-      570,
-      420,
-      new Color(73, 104, 92, 68),
-      54,
-    );
-    const card = this.app.createPanel(
-      overlay,
-      'CompletionCard',
-      0,
-      0,
-      570,
-      420,
-      new Color(255, 253, 235, 255),
-      54,
-      new Color(255, 255, 250, 245),
-      4,
-    );
-    card.setScale(new Vec3(0.72, 0.72, 1));
-    tween(card)
-      .to(0.34, { scale: Vec3.ONE }, { easing: 'backOut' })
-      .start();
-
-    this.app.createLabel(
-      card,
-      options.title,
-      0,
-      122,
-      34,
-      new Color(65, 91, 72, 255),
-      500,
-      56,
-    );
-    for (let index = 0; index < 3; index++) {
-      const star = this.app.createPuzzleStarMark(
-        card,
-        (index - 1) * 94,
-        48,
-        68,
-        index < options.stars,
-      );
-      star.setScale(new Vec3(0.2, 0.2, 1));
-      tween(star)
-        .delay(0.12 + index * 0.12)
-        .to(0.25, { scale: Vec3.ONE }, { easing: 'backOut' })
-        .start();
-    }
-
-    this.createActionButton(
-      card,
-      -150,
-      -105,
-      new Color(112, 174, 126, 255),
-      '‹',
-      options.onExit,
-    );
-    this.createActionButton(
-      card,
-      0,
-      -105,
-      new Color(245, 179, 71, 255),
-      '↻',
-      options.onReplay,
-    );
-    this.createActionButton(
-      card,
-      150,
-      -105,
-      new Color(92, 174, 214, 255),
-      '›',
-      options.onNext,
-    );
-  }
-
-  private createActionButton(
-    parent: Node,
-    x: number,
-    y: number,
-    color: Color,
-    label: string,
-    action: () => void,
-  ): void {
-    this.app.createCircle(parent, x, y - 7, 48, new Color(73, 92, 81, 60));
-    const button = this.app.createCircle(parent, x, y, 48, color);
-    this.app.createCircle(button, -13, 15, 8, new Color(255, 255, 248, 92));
-    this.app.createLabel(
-      button,
-      label,
-      0,
-      label === '›' ? 4 : 2,
-      48,
-      new Color(255, 255, 246, 255),
-      72,
-      68,
-    );
-    this.app.makeButton(button, action);
-  }
-
-  private createConfetti(parent: Node): void {
-    const colors = [
-      new Color(255, 189, 70, 255),
-      new Color(102, 190, 219, 255),
-      new Color(231, 126, 168, 255),
-      new Color(118, 181, 105, 255),
-      new Color(164, 132, 225, 255),
-    ];
-    const random = createSeededRandom(Date.now() & 0xffff);
-    for (let index = 0; index < 34; index++) {
-      const startX = (random() - 0.5) * 530;
-      const startY = 10 + random() * 120;
-      const piece = this.app.createPanel(
-        parent,
-        'Confetti',
-        startX,
-        startY,
-        10 + random() * 12,
-        18 + random() * 18,
-        colors[index % colors.length],
-        5,
-      );
-      piece.angle = random() * 180;
-      const targetX = startX + (random() - 0.5) * 380;
-      const targetY = -250 - random() * 130;
-      tween(piece)
-        .delay(random() * 0.28)
-        .to(
-          0.85 + random() * 0.55,
-          {
-            position: new Vec3(targetX, targetY, 0),
-            angle: piece.angle + 260 + random() * 320,
-          },
-          { easing: 'quadIn' },
-        )
-        .start();
-    }
   }
 }

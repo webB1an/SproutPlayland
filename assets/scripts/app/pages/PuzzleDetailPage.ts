@@ -42,7 +42,7 @@ export class PuzzleDetailPage extends PageController {
       this.visibleWidth / 4,
       0,
       this.visibleWidth / 2,
-      this.designHeight,
+      this.visibleHeight,
       new Color(247, 222, 244, 255),
       0,
     );

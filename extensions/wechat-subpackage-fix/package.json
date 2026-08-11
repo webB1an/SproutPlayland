@@ -1,0 +1,11 @@
+{
+  "name": "wechat-subpackage-fix",
+  "title": "WeChat Remote Bundle Fix",
+  "package_version": 2,
+  "version": "2.0.0",
+  "author": "Sprout Playland",
+  "description": "Moves dino-art resources to the remote output while keeping its script in the WeChat Mini Game package.",
+  "contributions": {
+    "builder": "./builder.js"
+  }
+}

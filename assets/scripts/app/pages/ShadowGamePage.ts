@@ -6,13 +6,13 @@ import {
 } from 'cc';
 import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
-import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createArtworkTile,
   createSeededRandom,
   type DifficultyStars,
   DragMatchController,
+  getArtworksForMiniGame,
   type DragMatchItemState,
   type DragMatchTargetState,
   getNextLevelIndex,
@@ -22,6 +22,7 @@ import {
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
+import { toColor } from '../ui/UiTheme';
 
 type ShadowTargetVisual = {
   node: Node;
@@ -40,7 +41,10 @@ export class ShadowGamePage extends PageController {
   show(levelIndex: number, difficulty: DifficultyStars = 1): void {
     const runId = ++this.runId;
     this.completed = false;
-    const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
+    const allArtworks = getArtworksForMiniGame(
+      'shadow',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     const activeArtwork = allArtworks[levelIndex];
     if (!activeArtwork) {
       this.onExit();
@@ -49,9 +53,9 @@ export class ShadowGamePage extends PageController {
     const matchCount = difficulty;
     const artworks = getWrappedArtworks(allArtworks, levelIndex, matchCount);
     const definition = getMiniGameDefinition('shadow');
-    const accent = this.toColor(definition.palette.accent);
+    const accent = toColor(definition.palette.accent);
     const root = this.resetScreen('ShadowGame');
-    this.drawFullBackground(root, this.toColor(definition.palette.background));
+    this.drawFullBackground(root, toColor(definition.palette.background));
     this.createCircle(root, -635, -320, 185, new Color(179, 151, 231, 52));
     this.createCircle(root, 625, 325, 150, new Color(255, 255, 244, 100));
     this.createBackButton(root, () => this.leave());
@@ -65,15 +69,6 @@ export class ShadowGamePage extends PageController {
       760,
       54,
     );
-    createMiniGameDifficultyBadge(
-      this.app,
-      root,
-      difficulty,
-      this.visibleWidth / 2 - 110,
-      310,
-      accent,
-    );
-
     const size = matchCount === 1 ? 238 : matchCount === 2 ? 216 : 186;
     const targetY = 92;
     const itemY = -195;
@@ -144,9 +139,33 @@ export class ShadowGamePage extends PageController {
       onPickup: () => {
         this.gameAudio?.play('pickup');
       },
-      onWrong: () => {
+      onWrong: (item) => {
         this.gameAudio?.play('drop');
         void this.customVoice?.play('retry', 3000);
+        // 放错时柔和闪烁正确目标，帮助儿童理解"要找一样的"，不做任何惩罚。
+        const correctTarget = targetStates.find(
+          (candidate) => !candidate.occupied && candidate.matchKey === item.matchKey,
+        );
+        const visual = correctTarget && targetVisuals.get(correctTarget.node);
+        if (!correctTarget || !visual) {
+          return;
+        }
+        tween(correctTarget.node)
+          .stop()
+          .to(0.16, { scale: new Vec3(1.1, 1.1, 1) }, { easing: 'sineOut' })
+          .to(0.2, { scale: Vec3.ONE }, { easing: 'sineIn' })
+          .to(0.16, { scale: new Vec3(1.1, 1.1, 1) }, { easing: 'sineOut' })
+          .to(0.22, { scale: Vec3.ONE }, { easing: 'sineIn' })
+          .start();
+        this.applyTargetAppearance(visual, difficulty, true);
+        tween(correctTarget.node)
+          .delay(0.9)
+          .call(() => {
+            if (runId === this.runId && !visual.matched && visual.preview.isValid) {
+              this.applyTargetAppearance(visual, difficulty, false);
+            }
+          })
+          .start();
       },
       onTargetFocus: (_item, target) => {
         for (const candidate of targetStates) {
@@ -398,7 +417,10 @@ export class ShadowGamePage extends PageController {
     levelIndex: number,
     difficulty: DifficultyStars,
   ): void {
-    const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
+    const allArtworks = getArtworksForMiniGame(
+      'shadow',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     miniGameProgress.award('shadow', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
@@ -417,9 +439,5 @@ export class ShadowGamePage extends PageController {
     this.runId++;
     this.completed = true;
     this.onExit();
-  }
-
-  private toColor(rgb: readonly [number, number, number]): Color {
-    return new Color(rgb[0], rgb[1], rgb[2], 255);
   }
 }

@@ -4,7 +4,9 @@ import {
   Graphics,
   Mask,
   Node,
+  sys,
   tween,
+  UIOpacity,
   Vec3,
 } from 'cc';
 import {
@@ -15,9 +17,20 @@ import {
   type MiniGameId,
 } from '../GameRegistry';
 import { PageController } from '../PageController';
+import { toColor } from '../ui/UiTheme';
 import { ArtworkGameSelectPage } from './ArtworkGameSelectPage';
 
 let savedHomeScrollOffset = 0;
+
+const HOME_RAIL_HINT_KEY = 'sprout-playland:home-rail-hint:v1';
+
+const HOME_ICON_FRAMES: Record<GameCardId, string> = {
+  puzzle: 'home-icon-puzzle-v2',
+  scratch: 'home-icon-scratch-v2',
+  shadow: 'home-icon-shadow',
+  bubble: 'home-icon-bubble-v2',
+  memory: 'home-icon-memory',
+};
 
 export class HomePage extends PageController {
   private railDragging = false;
@@ -215,17 +228,6 @@ export class HomePage extends PageController {
     );
     savedHomeScrollOffset = this.clamp(savedHomeScrollOffset, minOffset, 0);
 
-    this.createLabel(
-      parent,
-      '左右滑动选择游戏',
-      viewportX,
-      302,
-      21,
-      new Color(111, 128, 96, 220),
-      viewportWidth,
-      38,
-    );
-
     const viewport = this.createUiNode(
       'HomeGameViewport',
       parent,
@@ -268,13 +270,89 @@ export class HomePage extends PageController {
       );
     });
 
+    const pageCount = Math.round(-minOffset / cardStep) + 1;
+    const updatePagination = this.createRailPagination(
+      parent,
+      viewportX,
+      -4 - viewportHeight / 2 - 26,
+      pageCount,
+      cardStep,
+    );
+    updatePagination(savedHomeScrollOffset);
+
     this.makeGameRailDraggable(
       viewport,
       content,
       contentBaseX,
       minOffset,
       cardStep,
+      updatePagination,
     );
+
+    // 首次进入时轻轻演示一次"可以滑动"，帮助不识字的孩子发现更多玩法。
+    if (
+      pageCount > 1
+      && savedHomeScrollOffset === 0
+      && sys.localStorage.getItem(HOME_RAIL_HINT_KEY) !== '1'
+    ) {
+      sys.localStorage.setItem(HOME_RAIL_HINT_KEY, '1');
+      const nudgeOffset = Math.max(minOffset, -cardStep * 0.32);
+      tween(content)
+        .delay(0.85)
+        .to(
+          0.42,
+          { position: new Vec3(contentBaseX + nudgeOffset, 0, 0) },
+          { easing: 'quadOut' },
+        )
+        .call(() => updatePagination(nudgeOffset))
+        .to(
+          0.6,
+          { position: new Vec3(contentBaseX, 0, 0) },
+          { easing: 'backOut' },
+        )
+        .call(() => updatePagination(0))
+        .start();
+    }
+  }
+
+  private createRailPagination(
+    parent: Node,
+    centerX: number,
+    y: number,
+    pageCount: number,
+    cardStep: number,
+  ): (offset: number) => void {
+    const dots: Node[] = [];
+    for (let index = 0; index < pageCount; index++) {
+      const dot = this.createCircle(
+        parent,
+        centerX + (index - (pageCount - 1) / 2) * 26,
+        y,
+        5,
+        new Color(111, 128, 96, 255),
+      );
+      dot.addComponent(UIOpacity).opacity = 70;
+      dots.push(dot);
+    }
+    return (offset: number) => {
+      const activeIndex = this.clamp(
+        Math.round(-offset / cardStep),
+        0,
+        pageCount - 1,
+      );
+      dots.forEach((dot, index) => {
+        const active = index === activeIndex;
+        dot.getComponent(UIOpacity)!.opacity = active ? 255 : 70;
+        tween(dot)
+          .stop()
+          .to(
+            0.18,
+            { scale: new Vec3(active ? 1.5 : 1, active ? 1.5 : 1, 1) },
+            { easing: 'quadOut' },
+          )
+          .start();
+      });
+    };
   }
 
   private makeGameRailDraggable(
@@ -283,6 +361,7 @@ export class HomePage extends PageController {
     contentBaseX: number,
     minOffset: number,
     cardStep: number,
+    onOffsetChange: (offset: number) => void,
   ): void {
     let touchStartX = 0;
     let startOffset = savedHomeScrollOffset;
@@ -297,6 +376,9 @@ export class HomePage extends PageController {
     viewport.on(Node.EventType.TOUCH_MOVE, (event: EventTouch) => {
       const deltaX = this.touchToRoot(event).x - touchStartX;
       if (Math.abs(deltaX) > 10) {
+        if (!this.railDragging) {
+          sys.localStorage.setItem(HOME_RAIL_HINT_KEY, '1');
+        }
         this.railDragging = true;
       }
       if (!this.railDragging) {
@@ -304,14 +386,23 @@ export class HomePage extends PageController {
       }
       savedHomeScrollOffset = this.clamp(startOffset + deltaX, minOffset, 0);
       content.setPosition(contentBaseX + savedHomeScrollOffset, 0, 0);
+      onOffsetChange(savedHomeScrollOffset);
     });
 
     const finish = (): void => {
       if (this.railDragging) {
-        const target = this.clamp(
-          Math.round(savedHomeScrollOffset / cardStep) * cardStep,
-          minOffset,
-          0,
+        // 吸附点包含 minOffset，保证滑到末端时最后一张卡能完整展示，
+        // 而不是被按 cardStep 取整弹回导致裁掉一截。
+        const stops: number[] = [];
+        for (let stop = 0; stop > minOffset; stop -= cardStep) {
+          stops.push(stop);
+        }
+        stops.push(minOffset);
+        const target = stops.reduce((nearest, stop) =>
+          Math.abs(stop - savedHomeScrollOffset)
+            < Math.abs(nearest - savedHomeScrollOffset)
+            ? stop
+            : nearest,
         );
         savedHomeScrollOffset = target;
         tween(content)
@@ -320,6 +411,7 @@ export class HomePage extends PageController {
             { position: new Vec3(contentBaseX + target, 0, 0) },
             { easing: 'quadOut' },
           )
+          .call(() => onOffsetChange(target))
           .start();
       }
       this.scheduleOnce(() => {
@@ -339,9 +431,9 @@ export class HomePage extends PageController {
     width: number,
     height: number,
   ): void {
-    const cardColor = this.toColor(definition.palette.card);
-    const depthColor = this.toColor(definition.palette.depth);
-    const accentColor = this.toColor(definition.palette.accent);
+    const cardColor = toColor(definition.palette.card);
+    const depthColor = toColor(definition.palette.depth);
+    const accentColor = toColor(definition.palette.accent);
     this.createPanel(
       parent,
       `${definition.id}CardDepth`,
@@ -366,30 +458,10 @@ export class HomePage extends PageController {
     );
     this.createCircle(card, 0, 58, 94, new Color(255, 255, 244, 175));
     this.createGameIcon(card, definition.id, accentColor);
-    this.createLabel(
-      card,
-      definition.title,
-      0,
-      -78,
-      28,
-      new Color(63, 79, 66, 255),
-      width - 24,
-      44,
-    );
-    this.createLabel(
-      card,
-      definition.subtitle,
-      0,
-      -116,
-      17,
-      new Color(96, 111, 91, 255),
-      width - 20,
-      34,
-    );
     this.createCircle(
       card,
       0,
-      -160,
+      -124,
       31,
       new Color(depthColor.r, depthColor.g, depthColor.b, 255),
     );
@@ -397,7 +469,7 @@ export class HomePage extends PageController {
       card,
       '›',
       1,
-      -156,
+      -120,
       41,
       new Color(255, 255, 244, 255),
       46,
@@ -429,6 +501,46 @@ export class HomePage extends PageController {
   }
 
   private createGameIcon(parent: Node, gameId: GameCardId, accent: Color): void {
+    const artworkFrame = HOME_ICON_FRAMES[gameId];
+    if (this.frames.has(artworkFrame)) {
+      const frame = this.frames.get(artworkFrame)!;
+      const frameWidth = Math.max(1, frame.rect.width);
+      const frameHeight = Math.max(1, frame.rect.height);
+      const iconMaxSize = gameId === 'scratch' || gameId === 'bubble'
+        ? 152
+        : 172;
+      const iconScale = Math.min(
+        iconMaxSize / frameWidth,
+        iconMaxSize / frameHeight,
+      );
+
+      const clip = this.createUiNode(
+        `${gameId}IconClip`,
+        parent,
+        0,
+        58,
+        184,
+        184,
+      );
+      const mask = clip.addComponent(Mask);
+      mask.type = Mask.Type.GRAPHICS_STENCIL;
+      const maskGraphics = mask.subComp as Graphics;
+      maskGraphics.clear();
+      maskGraphics.fillColor = Color.WHITE;
+      maskGraphics.circle(0, 0, 91);
+      maskGraphics.fill();
+
+      this.createImage(
+        clip,
+        artworkFrame,
+        0,
+        0,
+        frameWidth * iconScale,
+        frameHeight * iconScale,
+      );
+      return;
+    }
+
     if (gameId === 'puzzle') {
       this.createPuzzleIcon(parent, accent);
       return;
@@ -626,7 +738,7 @@ export class HomePage extends PageController {
   }
 
   private createVoiceSettingsButton(parent: Node): void {
-    const position = this.getSafeTopRightPosition(66, 66);
+    const position = this.getSafeBottomLeftPosition(66, 66);
     this.createCircle(
       parent,
       position.x,
@@ -680,9 +792,5 @@ export class HomePage extends PageController {
       new Color(255, 255, 242, 80),
     ).setSiblingIndex(0);
     this.makeButton(button, () => this.showVoiceSettings());
-  }
-
-  private toColor(rgb: readonly [number, number, number]): Color {
-    return new Color(rgb[0], rgb[1], rgb[2], 255);
   }
 }

@@ -3,16 +3,18 @@ import {
   Graphics,
   Node,
   tween,
+  UIOpacity,
   Vec3,
 } from 'cc';
 import type { DifficultyStars } from './MiniGameShared';
-import { PuzzleGamePage } from './pages/PuzzleGamePage';
 
 export type GameCompletionModalOptions = {
   stars: DifficultyStars;
   onReplay: () => void;
   onNext: () => void;
   onMenu: () => void;
+  /** 是否播放彩纸粒子；拼图页有自己的庆祝演出时传 false。 */
+  confetti?: boolean;
 };
 
 /**
@@ -27,6 +29,10 @@ export class GameCompletionModal {
   show(parent: Node, options: GameCompletionModalOptions): void {
     if (parent.getChildByName('Completion')) {
       return;
+    }
+
+    if (options.confetti ?? true) {
+      this.createConfetti(parent);
     }
 
     const shadow = this.app.createPanel(
@@ -59,9 +65,23 @@ export class GameCompletionModal {
       .to(0.3, { scale: Vec3.ONE }, { easing: 'backOut' })
       .start();
 
-    this.createStarRow(overlay, options.stars, 0, 130, 62, 82);
+    for (let index = 0; index < 3; index++) {
+      const star = this.app.createPuzzleStarMark(
+        overlay,
+        (index - 1) * 82,
+        130,
+        62,
+        index < options.stars,
+      );
+      star.setScale(new Vec3(0.2, 0.2, 1));
+      tween(star)
+        .delay(0.18 + index * 0.12)
+        .to(0.25, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .start();
+    }
     this.createCompletionCheck(overlay, 0, 25);
-    this.createActionButton(
+
+    const replay = this.createActionButton(
       overlay,
       'ReplayButton',
       'ui-replay',
@@ -71,7 +91,7 @@ export class GameCompletionModal {
       new Color(245, 179, 71, 255),
       options.onReplay,
     );
-    this.createActionButton(
+    const next = this.createActionButton(
       overlay,
       'NextButton',
       'ui-next',
@@ -81,7 +101,7 @@ export class GameCompletionModal {
       new Color(92, 174, 214, 255),
       options.onNext,
     );
-    this.createActionButton(
+    const home = this.createActionButton(
       overlay,
       'HomeButton',
       'ui-menu',
@@ -91,6 +111,23 @@ export class GameCompletionModal {
       new Color(112, 174, 126, 255),
       options.onMenu,
     );
+
+    // 三个按钮错峰弹入，随后"下一关"轻脉冲两次，引导孩子理解它是继续。
+    const buttons = [replay, next, home];
+    buttons.forEach((button, index) => {
+      button.setScale(Vec3.ZERO);
+      tween(button)
+        .delay(0.24 + index * 0.08)
+        .to(0.24, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .start();
+    });
+    tween(next)
+      .delay(0.24 + buttons.length * 0.08 + 0.4)
+      .to(0.16, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+      .to(0.16, { scale: Vec3.ONE }, { easing: 'quadIn' })
+      .to(0.16, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'quadOut' })
+      .to(0.18, { scale: Vec3.ONE }, { easing: 'quadIn' })
+      .start();
   }
 
   private createActionButton(
@@ -102,12 +139,12 @@ export class GameCompletionModal {
     fallbackLabel: string,
     fallbackColor: Color,
     action: () => void,
-  ): void {
+  ): Node {
     if (this.app.frames.has(frameName)) {
       const button = this.app.createImage(parent, frameName, x, y, 94, 94);
       button.name = name;
       this.app.makeButton(button, action);
-      return;
+      return button;
     }
 
     this.app.createCircle(parent, x, y - 7, 47, new Color(73, 92, 81, 54));
@@ -124,25 +161,7 @@ export class GameCompletionModal {
       66,
     );
     this.app.makeButton(button, action);
-  }
-
-  private createStarRow(
-    parent: Node,
-    earnedStars: number,
-    x: number,
-    y: number,
-    size: number,
-    gap: number,
-  ): void {
-    for (let index = 0; index < 3; index++) {
-      this.app.createPuzzleStarMark(
-        parent,
-        x + (index - 1) * gap,
-        y,
-        size,
-        index < earnedStars,
-      );
-    }
+    return button;
   }
 
   private createCompletionCheck(parent: Node, x: number, y: number): void {
@@ -168,47 +187,64 @@ export class GameCompletionModal {
     this.app.createCircle(mark, -5, -12, 5, color);
     this.app.createCircle(mark, 19, 15, 5, color);
   }
-}
 
-const SHARED_COMPLETION_FLAG = '__sproutSharedCompletionModalInstalled';
-
-/**
- * 让现有拼图页也走同一个完成弹窗组件。
- *
- * PuzzleGamePage 仍保留自己的拼图完成演出；演出结束后调用的
- * showCompletion 会在模块加载时替换为这里的共用实现。
- */
-function installPuzzleCompletionModal(): void {
-  const prototype = PuzzleGamePage.prototype as any;
-  if (prototype[SHARED_COMPLETION_FLAG]) {
-    return;
-  }
-  prototype[SHARED_COMPLETION_FLAG] = true;
-  prototype.showCompletion = function showSharedPuzzleCompletion(this: any): void {
-    const root = this.contentRoot as Node | null;
-    if (!root || root.getChildByName('Completion')) {
-      return;
+  private createConfetti(parent: Node): void {
+    const layer = this.app.createUiNode(
+      'CompletionConfetti',
+      parent,
+      0,
+      0,
+      this.app.visibleWidth,
+      this.app.visibleHeight,
+    );
+    const colors = [
+      new Color(255, 189, 70, 255),
+      new Color(102, 190, 219, 255),
+      new Color(231, 126, 168, 255),
+      new Color(118, 181, 105, 255),
+      new Color(164, 132, 225, 255),
+    ];
+    for (let index = 0; index < 34; index++) {
+      const startX = (Math.random() - 0.5) * 530;
+      const startY = 10 + Math.random() * 120;
+      const piece = this.app.createPanel(
+        layer,
+        'Confetti',
+        startX,
+        startY,
+        10 + Math.random() * 12,
+        18 + Math.random() * 18,
+        colors[index % colors.length],
+        5,
+      );
+      piece.angle = Math.random() * 180;
+      const targetX = startX + (Math.random() - 0.5) * 380;
+      const targetY = -250 - Math.random() * 130;
+      const duration = 0.85 + Math.random() * 0.55;
+      tween(piece)
+        .delay(Math.random() * 0.28)
+        .to(
+          duration,
+          {
+            position: new Vec3(targetX, targetY, 0),
+            angle: piece.angle + 260 + Math.random() * 320,
+          },
+          { easing: 'quadIn' },
+          )
+        .start();
+      const opacity = piece.addComponent(UIOpacity);
+      tween(opacity)
+        .delay(duration * 0.8)
+        .to(0.4, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
     }
-    this.completed = true;
-    const stars = (this.currentCompletionStars || this.getStarsForPieceCount()) as DifficultyStars;
-    new GameCompletionModal(this.app).show(root, {
-      stars,
-      onReplay: () => this.show(),
-      onNext: () => {
-        const artworks = this.puzzleArtworks as Array<{ id: string }>;
-        if (artworks.length === 0) {
-          return;
+    tween(layer)
+      .delay(2.6)
+      .call(() => {
+        if (layer.isValid) {
+          layer.destroy();
         }
-        const currentIndex = Math.max(
-          0,
-          artworks.findIndex((artwork) => artwork.id === this.activePuzzleArtwork.id),
-        );
-        this.activePuzzleArtwork = artworks[(currentIndex + 1) % artworks.length];
-        this.show();
-      },
-      onMenu: () => this.showCategory('puzzle'),
-    });
-  };
+      })
+      .start();
+  }
 }
-
-installPuzzleCompletionModal();

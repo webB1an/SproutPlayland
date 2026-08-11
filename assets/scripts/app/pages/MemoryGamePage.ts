@@ -2,21 +2,22 @@ import {
   Color,
   Node,
   tween,
+  UIOpacity,
   Vec3,
 } from 'cc';
 import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
-import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
-  createSeededRandom,
   type DifficultyStars,
+  getArtworksForMiniGame,
   getNextLevelIndex,
   getWrappedArtworks,
   shuffleWithRandom,
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
+import { toColor } from '../ui/UiTheme';
 
 type MemoryCardState = {
   card: Node;
@@ -33,6 +34,7 @@ export class MemoryGamePage extends PageController {
   private completed = false;
   private selected: MemoryCardState[] = [];
   private cards: MemoryCardState[] = [];
+  private pairDots: Node[] = [];
 
   constructor(app: any, private readonly onExit: () => void) {
     super(app);
@@ -44,7 +46,10 @@ export class MemoryGamePage extends PageController {
     this.completed = false;
     this.selected = [];
     this.cards = [];
-    const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
+    const allArtworks = getArtworksForMiniGame(
+      'memory',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     const activeArtwork = allArtworks[levelIndex];
     if (!activeArtwork) {
       this.onExit();
@@ -52,40 +57,50 @@ export class MemoryGamePage extends PageController {
     }
     const pairCount = difficulty + 1;
     const artworks = getWrappedArtworks(allArtworks, levelIndex, pairCount);
-    const random = createSeededRandom(
-      9059 + levelIndex * 131 + difficulty * 991,
-    );
     const pairedArtworks: PuzzleArtwork[] = [];
     for (const artwork of artworks) {
       pairedArtworks.push(artwork, artwork);
     }
-    const deck = shuffleWithRandom(pairedArtworks, random);
+    const deck = shuffleWithRandom(pairedArtworks, Math.random);
     const definition = getMiniGameDefinition('memory');
-    const accent = this.toColor(definition.palette.accent);
+    const accent = toColor(definition.palette.accent);
     const root = this.resetScreen('MemoryGame');
-    this.drawFullBackground(root, this.toColor(definition.palette.background));
+    this.drawFullBackground(root, toColor(definition.palette.background));
     this.createCircle(root, -630, -330, 190, new Color(239, 142, 180, 42));
     this.createCircle(root, 625, 325, 160, new Color(255, 255, 244, 100));
     this.createBackButton(root, () => this.leave());
-    this.createLabel(
+    this.createPanel(
       root,
-      definition.instruction,
-      0,
-      310,
-      34,
-      new Color(102, 71, 88, 255),
-      680,
-      54,
+      'MemoryTargetDepth',
+      4,
+      302,
+      88,
+      88,
+      new Color(accent.r, accent.g, accent.b, 48),
+      22,
     );
-    createMiniGameDifficultyBadge(
-      this.app,
-      root,
-      difficulty,
-      this.visibleWidth / 2 - 110,
-      310,
-      accent,
-    );
-
+    if (this.frames.has(activeArtwork.thumbnailFrame)) {
+      this.createCoverImage(
+        root,
+        activeArtwork.thumbnailFrame,
+        0,
+        310,
+        82,
+        82,
+        20,
+      );
+    } else {
+      this.createPanel(
+        root,
+        'MemoryTargetFallback',
+        0,
+        310,
+        82,
+        82,
+        activeArtwork.fallbackColor,
+        20,
+      );
+    }
     const layout = this.getLayout(pairCount);
     deck.forEach((artwork, index) => {
       const column = index % layout.columns;
@@ -103,8 +118,15 @@ export class MemoryGamePage extends PageController {
       );
       this.cards.push(state);
       this.bindCard(state, levelIndex, difficulty, activeArtwork, runId);
+      // 卡片错峰弹入，弱化整屏同时出现的生硬感。
+      state.card.setScale(Vec3.ZERO);
+      tween(state.card)
+        .delay(0.12 + index * 0.05)
+        .to(0.28, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .start();
     });
-    this.createPairProgress(root, pairCount);
+    // 只需要找到选关时指定的目标配对，因此进度只显示一个目标点。
+    this.createPairProgress(root, 1);
   }
 
   private getLayout(pairCount: number): {
@@ -190,20 +212,10 @@ export class MemoryGamePage extends PageController {
       front,
       artwork.thumbnailFrame,
       0,
-      9,
-      width - 16,
-      height - 46,
-      Math.max(16, width * 0.11),
-    );
-    this.createLabel(
-      front,
-      artwork.title,
       0,
-      -height / 2 + 24,
-      Math.max(18, width * 0.13),
-      new Color(75, 91, 82, 255),
-      width - 18,
-      34,
+      width - 16,
+      height - 16,
+      Math.max(16, width * 0.11),
     );
     front.active = false;
 
@@ -215,26 +227,36 @@ export class MemoryGamePage extends PageController {
       0,
       width,
       height,
-      index % 2 === 0
-        ? new Color(224, 135, 174, 255)
-        : new Color(198, 137, 211, 255),
+      new Color(224, 135, 174, 255),
       Math.max(20, width * 0.14),
       new Color(255, 240, 249, 245),
       4,
     );
-    this.createPanel(
-      back,
-      'MemoryBackInset',
-      0,
-      0,
-      width - 24,
-      height - 24,
-      new Color(255, 255, 255, 26),
-      Math.max(16, width * 0.11),
-      new Color(255, 255, 255, 82),
-      3,
-    );
-    this.createSproutMark(back, 0, 0, Math.max(0.34, width / 500));
+    if (this.frames.has('memory-card-back-v1')) {
+      this.createCoverImage(
+        back,
+        'memory-card-back-v1',
+        0,
+        0,
+        width - 12,
+        height - 12,
+        Math.max(16, width * 0.11),
+      );
+    } else {
+      this.createPanel(
+        back,
+        'MemoryBackInset',
+        0,
+        0,
+        width - 24,
+        height - 24,
+        new Color(255, 255, 255, 26),
+        Math.max(16, width * 0.11),
+        new Color(255, 255, 255, 82),
+        3,
+      );
+      this.createSproutMark(back, 0, 0, Math.max(0.34, width / 500));
+    }
 
     return {
       card,
@@ -295,8 +317,12 @@ export class MemoryGamePage extends PageController {
     }
     this.locked = true;
     if (first.artwork.id === second.artwork.id) {
+      const matchedTarget = first.artwork.id === activeArtwork.id;
       first.matched = true;
       second.matched = true;
+      if (matchedTarget) {
+        this.completed = true;
+      }
       this.gameAudio?.play('success');
       void this.customVoice?.playRandom(['correct', 'great'], 1000);
       [first, second].forEach((cardState, index) => {
@@ -311,15 +337,16 @@ export class MemoryGamePage extends PageController {
           .start();
         this.createMatchStar(cardState.card);
       });
+      if (matchedTarget) {
+        this.refreshPairProgress();
+      }
       tween(first.card)
         .delay(0.36)
         .call(() => {
           if (runId !== this.runId) {
             return;
           }
-          this.locked = false;
-          if (this.cards.every((card) => card.matched)) {
-            this.completed = true;
+          if (matchedTarget) {
             tween(first.card)
               .delay(0.36)
               .call(() => {
@@ -332,7 +359,9 @@ export class MemoryGamePage extends PageController {
                 }
               })
               .start();
+            return;
           }
+          this.locked = false;
         })
         .start();
       return;
@@ -406,15 +435,37 @@ export class MemoryGamePage extends PageController {
   }
 
   private createPairProgress(parent: Node, pairCount: number): void {
+    this.pairDots = [];
     for (let index = 0; index < pairCount; index++) {
-      this.createCircle(
+      const dot = this.createCircle(
         parent,
         (index - (pairCount - 1) / 2) * 34,
         -323,
         8,
-        new Color(215, 137, 173, 145),
+        new Color(215, 137, 173, 255),
       );
+      dot.addComponent(UIOpacity).opacity = 80;
+      this.pairDots.push(dot);
     }
+  }
+
+  // 配对成功的圆点点亮并弹跳，让底部圆点成为真实的对局进度。
+  private refreshPairProgress(): void {
+    const matchedPairs = this.cards.filter((card) => card.matched).length / 2;
+    this.pairDots.forEach((dot, index) => {
+      if (!dot.isValid || index >= matchedPairs) {
+        return;
+      }
+      const opacity = dot.getComponent(UIOpacity)!;
+      if (opacity.opacity === 255) {
+        return;
+      }
+      opacity.opacity = 255;
+      tween(dot)
+        .to(0.14, { scale: new Vec3(1.6, 1.6, 1) }, { easing: 'quadOut' })
+        .to(0.2, { scale: Vec3.ONE }, { easing: 'backOut' })
+        .start();
+    });
   }
 
   private showCompletion(
@@ -422,7 +473,10 @@ export class MemoryGamePage extends PageController {
     levelIndex: number,
     difficulty: DifficultyStars,
   ): void {
-    const allArtworks = this.puzzleArtworks as PuzzleArtwork[];
+    const allArtworks = getArtworksForMiniGame(
+      'memory',
+      this.puzzleArtworks as PuzzleArtwork[],
+    );
     miniGameProgress.award('memory', artwork.id, difficulty);
     this.gameAudio?.play('celebrate');
     void this.customVoice?.play('complete');
@@ -442,9 +496,5 @@ export class MemoryGamePage extends PageController {
     this.locked = true;
     this.completed = true;
     this.onExit();
-  }
-
-  private toColor(rgb: readonly [number, number, number]): Color {
-    return new Color(rgb[0], rgb[1], rgb[2], 255);
   }
 }

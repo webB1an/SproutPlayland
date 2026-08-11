@@ -8,7 +8,6 @@ import {
 } from 'cc';
 import { GameCompletionModal } from '../GameCompletionModal';
 import { getMiniGameDefinition } from '../GameRegistry';
-import { createMiniGameDifficultyBadge } from '../MiniGameDifficulty';
 import { miniGameProgress } from '../MiniGameProgressStore';
 import {
   createSeededRandom,
@@ -17,6 +16,7 @@ import {
 } from '../MiniGameShared';
 import type { PuzzleArtwork } from '../../games/puzzle/PuzzleTypes';
 import { PageController } from '../PageController';
+import { toColor } from '../ui/UiTheme';
 
 type ScratchPatch = {
   node: Node;
@@ -62,6 +62,7 @@ export class ScratchGamePage extends PageController {
   private patches: ScratchPatch[] = [];
   private revealedCount = 0;
   private progressFill: Node | null = null;
+  private progressGlowing = false;
   private handHint: Node | null = null;
 
   constructor(app: any, private readonly onExit: () => void) {
@@ -74,6 +75,7 @@ export class ScratchGamePage extends PageController {
     this.patches = [];
     this.revealedCount = 0;
     this.progressFill = null;
+    this.progressGlowing = false;
     this.handHint = null;
 
     const artworks = this.puzzleArtworks as PuzzleArtwork[];
@@ -83,9 +85,9 @@ export class ScratchGamePage extends PageController {
       return;
     }
     const definition = getMiniGameDefinition('scratch');
-    const accent = this.toColor(definition.palette.accent);
+    const accent = toColor(definition.palette.accent);
     const root = this.resetScreen('ScratchGame');
-    this.drawFullBackground(root, this.toColor(definition.palette.background));
+    this.drawFullBackground(root, toColor(definition.palette.background));
     this.createCircle(root, -620, -330, 190, new Color(255, 211, 125, 65));
     this.createCircle(root, 620, 325, 155, new Color(255, 255, 241, 95));
     this.createBackButton(root, () => this.leave());
@@ -99,15 +101,6 @@ export class ScratchGamePage extends PageController {
       620,
       54,
     );
-    createMiniGameDifficultyBadge(
-      this.app,
-      root,
-      difficulty,
-      this.visibleWidth / 2 - 110,
-      310,
-      accent,
-    );
-
     const boardSize = 520;
     this.createPanel(
       root,
@@ -157,13 +150,19 @@ export class ScratchGamePage extends PageController {
       if (this.completed || runId !== this.runId) {
         return;
       }
+      const point = this.touchToRoot(event);
+      const localX = point.x - board.position.x;
+      const localY = point.y - board.position.y;
+      if (
+        Math.abs(localX) > boardSize / 2 + 18
+        || Math.abs(localY) > boardSize / 2 + 18
+      ) {
+        return;
+      }
       if (this.handHint?.isValid) {
         this.handHint.destroy();
         this.handHint = null;
       }
-      const point = this.touchToRoot(event);
-      const localX = point.x - board.position.x;
-      const localY = point.y - board.position.y;
       this.revealNear(
         localX,
         localY,
@@ -174,8 +173,10 @@ export class ScratchGamePage extends PageController {
         difficulty,
       );
     };
-    board.on(Node.EventType.TOUCH_START, revealAt);
-    board.on(Node.EventType.TOUCH_MOVE, revealAt);
+    // 监听页面触摸面，而不是只监听被几十个云朵子节点覆盖的 board。
+    // 这样浏览器鼠标模拟、真机滑动和触摸从云朵外缘进入时都能连续擦除。
+    root.on(Node.EventType.TOUCH_START, revealAt);
+    root.on(Node.EventType.TOUCH_MOVE, revealAt);
   }
 
   private createCloudCover(
@@ -241,9 +242,9 @@ export class ScratchGamePage extends PageController {
       0,
       -326,
       430,
-      22,
+      28,
       new Color(255, 255, 245, 190),
-      11,
+      14,
       new Color(216, 198, 157, 130),
       2,
     );
@@ -253,10 +254,11 @@ export class ScratchGamePage extends PageController {
       -204,
       0,
       8,
-      14,
+      18,
       new Color(245, 179, 71, 255),
-      7,
+      9,
     );
+    this.progressFill.addComponent(UIOpacity);
   }
 
   private createHandHint(parent: Node): Node {
@@ -366,9 +368,22 @@ export class ScratchGamePage extends PageController {
     if (!this.progressFill?.isValid) {
       return;
     }
-    const width = Math.max(8, 408 * Math.max(0, Math.min(1, progress)));
-    this.resizeFlatPanel(this.progressFill, width, 14, 7);
+    const clamped = Math.max(0, Math.min(1, progress));
+    const width = Math.max(8, 408 * clamped);
+    this.resizeFlatPanel(this.progressFill, width, 18, 9);
     this.progressFill.setPosition(-204 + width / 2, 0, 0);
+    // 接近完成时让进度条呼吸发光，帮助孩子感知“快完成了”。
+    if (clamped >= 0.8 && !this.progressGlowing) {
+      this.progressGlowing = true;
+      const opacity = this.progressFill.getComponent(UIOpacity)!;
+      tween(opacity)
+        .repeatForever(
+          tween<UIOpacity>()
+            .to(0.55, { opacity: 168 }, { easing: 'sineInOut' })
+            .to(0.55, { opacity: 255 }, { easing: 'sineInOut' }),
+        )
+        .start();
+    }
   }
 
   private complete(
@@ -443,9 +458,5 @@ export class ScratchGamePage extends PageController {
     this.runId++;
     this.completed = true;
     this.onExit();
-  }
-
-  private toColor(rgb: readonly [number, number, number]): Color {
-    return new Color(rgb[0], rgb[1], rgb[2], 255);
   }
 }

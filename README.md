@@ -41,6 +41,9 @@ assets/scripts/
 │  ├─ GameRegistry.ts                # 首页游戏注册表、配色和文案
 │  ├─ MiniGameProgressStore.ts       # 四种小游戏共用的本地星级进度
 │  ├─ MiniGameShared.ts              # 关卡难度、素材轮转、拖拽归位和完成奖励
+│  ├─ GameCompletionModal.ts         # 全游戏共用的完成弹窗（星星、彩纸、按钮编排）
+│  ├─ ui/
+│  │  └─ UiTheme.ts                  # UI 设计 token（颜色、圆角、字号、阴影）
 │  └─ pages/
 │     ├─ HomePage.ts                 # 五游戏首页
 │     ├─ ArtworkGameSelectPage.ts    # 四种小游戏共用选关页
@@ -89,6 +92,8 @@ assets/scripts/games/puzzle/PuzzleConfig.ts
 ```
 
 四种新增玩法只读取这些字段，不需要额外制作“擦除版、泡泡版、翻牌版或目标版”图片。
+
+选关与难度统一采用两步流程：先选择画面，再进入大尺寸难度设置页。拼图在同一设置页额外选择拼块数量与外轮廓。明确以“恐龙”为目标的配对、泡泡和翻牌玩法只读取 `dino-` 素材；擦擦发现仍可使用完整场景图。
 
 ## 各玩法实现
 
@@ -184,3 +189,42 @@ build/
 7. 真机检查安全区、触摸手感、首次资源加载、内存和不同屏幕比例。
 
 第一阶段不使用登录、网络服务、广告、支付或第三方统计 SDK。
+
+## 远程资源自动部署
+
+`.github/workflows/deploy-remote-assets.yml` 会在 `main` 分支每次推送后：
+
+1. 使用 GitHub 托管的 `ubuntu-latest` Runner；
+2. 校验仓库中准备好的 `dino-art` 与 `resources` 远程包；
+3. 通过 SSH 增量部署到：
+
+```text
+/www/wwwroot/sprout-playland-assets.wdbzk.com/remote
+```
+
+远端部署采用内容哈希文件增量合并，不删除旧版本资源，保证旧预览二维码仍可读取其对应资源。该流程只部署服务器资源，不上传或发布微信小游戏版本。
+
+每次修改代码或资源、准备推送前，在项目根目录运行：
+
+```powershell
+.\tools\prepare-remote-assets.ps1
+```
+
+该命令会调用本机 Cocos Creator 构建微信小游戏，并把服务器所需内容整理到 `deploy/remote`。随后检查、提交并推送代码和 `deploy/remote`；GitHub Actions 只负责上传，不需要安装自托管 Runner。
+
+如果刚刚已经完成过 Cocos 构建，只想重新整理现有构建产物，可以运行：
+
+```powershell
+.\tools\prepare-remote-assets.ps1 -SkipBuild
+```
+
+首次启用需要在 GitHub 仓库中完成以下配置：
+
+1. 在 `Settings → Secrets and variables → Actions` 添加：
+   - `DEPLOY_HOST`：服务器地址；
+   - `DEPLOY_PORT`：SSH 端口，通常为 `22`；
+   - `DEPLOY_USER`：拥有资源站目录写权限的 SSH 用户；
+   - `DEPLOY_SSH_KEY`：对应用户的 SSH 私钥全文；
+2. 将对应公钥加入服务器用户的 `~/.ssh/authorized_keys`。
+
+也可以在 GitHub Actions 页面手动运行 `Deploy remote game assets`。

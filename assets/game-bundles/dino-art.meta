@@ -1,0 +1,20 @@
+{
+  "ver": "1.2.0",
+  "importer": "directory",
+  "imported": true,
+  "uuid": "400413ec-5c91-49a1-ac84-16af223ada75",
+  "files": [],
+  "subMetas": {},
+  "userData": {
+    "isBundle": true,
+    "bundleConfigID": "default",
+    "bundleName": "dino-art",
+    "priority": 1,
+    "compressionType": {
+      "wechatgame": "merge_all_json"
+    },
+    "isRemoteBundle": {
+      "wechatgame": true
+    }
+  }
+}
